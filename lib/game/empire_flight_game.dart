@@ -15,7 +15,7 @@ class EmpireFlightGame extends StatefulWidget {
 }
 
 class _EmpireFlightGameState extends State<EmpireFlightGame> {
-  final FocusNode _focusNode = FocusNode();
+  //final FocusNode _focusNode = FocusNode();
 
   late final List<MissionConfig> missions;
   late PlayerShip player;
@@ -93,15 +93,12 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
     _newCampaign();
     _startLoop();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _focusNode.requestFocus();
-    });
-  }
+    
 
   @override
   void dispose() {
     loop?.cancel();
-    _focusNode.dispose();
+    
     super.dispose();
   }
 
@@ -147,17 +144,25 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     firePressed = false;
   }
 
-  void _startLoop() {
-    loop?.cancel();
-    lastTick = DateTime.now();
+void _startLoop() {
+  loop?.cancel();
+  lastTick = null;
 
-    loop = Timer.periodic(const Duration(milliseconds: 16), (_) {
-      final now = DateTime.now();
-      final dt = (now.difference(lastTick!).inMicroseconds / 1000000.0).clamp(0.0, 0.033);
+  loop = Timer.periodic(const Duration(milliseconds: 16), (_) {
+    final now = DateTime.now();
+
+    if (lastTick == null) {
       lastTick = now;
-      _update(dt);
-    });
-  }
+      return;
+    }
+
+    final dt = (now.difference(lastTick!).inMicroseconds / 1000000.0)
+        .clamp(0.0, 0.033);
+
+    lastTick = now;
+    _update(dt);
+  });
+}
 
   void _update(double dt) {
     if (!mounted) return;
@@ -426,19 +431,19 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   void _startMission() {
     phase = GamePhase.playing;
-    _focusNode.requestFocus();
+    
   }
 
   void _nextMission() {
     missionIndex += 1;
     _loadMission();
     phase = GamePhase.briefing;
-    _focusNode.requestFocus();
+    
   }
 
   void _restartCampaign() {
     _newCampaign();
-    _focusNode.requestFocus();
+    
   }
 
   void _onDragUpdate(DragUpdateDetails details, BoxConstraints c) {
@@ -554,13 +559,13 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
           final isMobileLayout = constraints.maxWidth < 900;
 
           return Focus(
-            focusNode: _focusNode,
+            
             autofocus: true,
             onKeyEvent: _onKey,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () {
-                _focusNode.requestFocus();
+                
                 if (phase != GamePhase.playing) {
                   _handlePrimaryAction();
                 }
