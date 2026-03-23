@@ -4,6 +4,7 @@ import 'game/empire_flight_game.dart';
 
 void main() {
   runApp(const EmpireFlightApp());
+  // delete this note
 }
 
 class EmpireFlightApp extends StatelessWidget {
