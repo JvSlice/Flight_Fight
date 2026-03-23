@@ -15,8 +15,6 @@ class EmpireFlightGame extends StatefulWidget {
 }
 
 class _EmpireFlightGameState extends State<EmpireFlightGame> {
-  //final FocusNode _focusNode = FocusNode();
-
   late final List<MissionConfig> missions;
   late PlayerShip player;
 
@@ -46,6 +44,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   @override
   void initState() {
     super.initState();
+
     missions = [
       const MissionConfig(
         name: 'Mission 1: Ice Run',
@@ -93,12 +92,11 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
     _newCampaign();
     _startLoop();
-    
+  }
 
   @override
   void dispose() {
     loop?.cancel();
-    
     super.dispose();
   }
 
@@ -119,9 +117,11 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
       fireCooldown: 0,
       alive: true,
     );
+
     obstacles.clear();
     bullets.clear();
     explosions.clear();
+
     stars
       ..clear()
       ..addAll(List.generate(
@@ -144,25 +144,27 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     firePressed = false;
   }
 
-void _startLoop() {
-  loop?.cancel();
-  lastTick = null;
+  void _startLoop() {
+    loop?.cancel();
+    lastTick = null;
 
-  loop = Timer.periodic(const Duration(milliseconds: 16), (_) {
-    final now = DateTime.now();
+    loop = Timer.periodic(const Duration(milliseconds: 16), (_) {
+      final now = DateTime.now();
 
-    if (lastTick == null) {
+      // HACKABLE NOTE:
+      // First tick just establishes time so web startup is safer.
+      if (lastTick == null) {
+        lastTick = now;
+        return;
+      }
+
+      final dt = (now.difference(lastTick!).inMicroseconds / 1000000.0)
+          .clamp(0.0, 0.033);
+
       lastTick = now;
-      return;
-    }
-
-    final dt = (now.difference(lastTick!).inMicroseconds / 1000000.0)
-        .clamp(0.0, 0.033);
-
-    lastTick = now;
-    _update(dt);
-  });
-}
+      _update(dt);
+    });
+  }
 
   void _update(double dt) {
     if (!mounted) return;
@@ -215,6 +217,7 @@ void _startLoop() {
 
   void _updateStars(double dt, {bool idle = false}) {
     final speed = idle ? 0.03 : (0.08 + difficulty * 0.02);
+
     for (final s in stars) {
       s.y += s.speed * speed * dt * 9;
       if (s.y > 1.0) {
@@ -224,7 +227,8 @@ void _startLoop() {
     }
   }
 
-  double get difficulty => 1.0 + (missionDistance / mission.targetDistance) * 0.9;
+  double get difficulty =>
+      1.0 + (missionDistance / mission.targetDistance) * 0.9;
 
   double get currentSpeed => mission.baseSpeed * difficulty;
 
@@ -255,6 +259,7 @@ void _startLoop() {
     final lane = lanes[GameMath.rng.nextInt(lanes.length)];
 
     late ObstacleType type;
+
     switch (mission.biome) {
       case MissionBiome.ice:
         type = ObstacleType.pillar;
@@ -295,7 +300,8 @@ void _startLoop() {
   }
 
   void _spawnGateRarely() {
-    if (obstacles.where((o) => o.type == ObstacleType.gate).isNotEmpty) return;
+    if (obstacles.any((o) => o.type == ObstacleType.gate)) return;
+
     obstacles.add(
       Obstacle(
         type: ObstacleType.gate,
@@ -329,7 +335,9 @@ void _startLoop() {
   void _updateBullets(double dt) {
     for (final b in bullets) {
       b.z -= dt * 1.55;
-      if (b.z < 0.0) b.active = false;
+      if (b.z < 0.0) {
+        b.active = false;
+      }
     }
   }
 
@@ -337,18 +345,23 @@ void _startLoop() {
     for (final o in obstacles) {
       if (!o.active) continue;
 
-      // Bullet vs obstacle
+      // HACKABLE NOTE:
+      // Bullet hit tuning:
+      // - z tolerance changes how forgiving shots feel
+      // - width multiplier changes horizontal hitbox feel
       for (final b in bullets) {
         if (!b.active) continue;
-        if ((b.z - o.z).abs() < 0.07 && (b.x - o.laneX).abs() < (o.width * 1.4)) {
+
+        if ((b.z - o.z).abs() < 0.07 &&
+            (b.x - o.laneX).abs() < (o.width * 1.4)) {
           b.active = false;
+
           if (o.type == ObstacleType.drone) {
             o.hp -= 1;
             if (o.hp <= 0) {
               _destroyObstacle(o, 120);
             }
           } else if (o.type == ObstacleType.gate) {
-            // Gate is not destroyed, but lets the player score if threaded cleanly.
             score += 20;
           } else {
             _destroyObstacle(o, 35);
@@ -356,9 +369,9 @@ void _startLoop() {
         }
       }
 
-      // Player vs obstacle
       if (o.z > 0.86 && o.z < 1.03) {
         final xHit = (player.x - o.laneX).abs() < (o.width * 1.55);
+
         if (xHit) {
           if (o.type == ObstacleType.gate) {
             score += 40;
@@ -366,7 +379,9 @@ void _startLoop() {
           } else {
             _hitPlayer(o.type == ObstacleType.drone ? 18 : 24);
             o.active = false;
-            explosions.add(Explosion(x: o.laneX, y: player.y - 0.02));
+            explosions.add(
+              Explosion(x: o.laneX, y: player.y - 0.02),
+            );
           }
         }
       }
@@ -382,6 +397,7 @@ void _startLoop() {
   void _hitPlayer(double damage) {
     player.health -= damage;
     flashTimer = 0.14;
+
     if (player.health <= 0) {
       player.health = 0;
       player.alive = false;
@@ -392,10 +408,14 @@ void _startLoop() {
   void _cleanupObjects() {
     obstacles.removeWhere((o) => !o.active || o.z > 1.12);
     bullets.removeWhere((b) => !b.active);
+
     for (final e in explosions) {
       e.t += 0.035;
-      if (e.t >= 1.0) e.active = false;
+      if (e.t >= 1.0) {
+        e.active = false;
+      }
     }
+
     explosions.removeWhere((e) => !e.active);
   }
 
@@ -404,6 +424,7 @@ void _startLoop() {
 
     if (missionDistance >= mission.targetDistance) {
       score += mission.bonusForCompletion;
+
       if (missionIndex >= missions.length - 1) {
         phase = GamePhase.victory;
       } else {
@@ -416,11 +437,13 @@ void _startLoop() {
     if (phase != GamePhase.playing) return;
     if (player.fireCooldown > 0) return;
 
-    bullets.add(Bullet(
-      x: player.x,
-      y: player.y - 0.10,
-      z: 0.92,
-    ));
+    bullets.add(
+      Bullet(
+        x: player.x,
+        y: player.y - 0.10,
+        z: 0.92,
+      ),
+    );
 
     player.fireCooldown = 0.16;
   }
@@ -431,23 +454,21 @@ void _startLoop() {
 
   void _startMission() {
     phase = GamePhase.playing;
-    
   }
 
   void _nextMission() {
     missionIndex += 1;
     _loadMission();
     phase = GamePhase.briefing;
-    
   }
 
   void _restartCampaign() {
     _newCampaign();
-    
   }
 
   void _onDragUpdate(DragUpdateDetails details, BoxConstraints c) {
     touchMode = true;
+
     final dx = details.localPosition.dx / c.maxWidth;
     final dy = details.localPosition.dy / c.maxHeight;
 
@@ -460,39 +481,50 @@ void _startLoop() {
     final isUp = event is KeyUpEvent;
     final key = event.logicalKey;
 
-    void setKey(bool down, void Function(bool v) setter) {
+    void setKey(void Function(bool v) setter) {
       if (isDown) setter(true);
       if (isUp) setter(false);
     }
 
-    if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.keyA) {
-      setKey(isDown, (v) => leftPressed = v);
+    if (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.keyA) {
+      setKey((v) => leftPressed = v);
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.keyD) {
-      setKey(isDown, (v) => rightPressed = v);
+
+    if (key == LogicalKeyboardKey.arrowRight ||
+        key == LogicalKeyboardKey.keyD) {
+      setKey((v) => rightPressed = v);
       return KeyEventResult.handled;
     }
+
     if (key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.keyW) {
-      setKey(isDown, (v) => upPressed = v);
+      setKey((v) => upPressed = v);
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.arrowDown || key == LogicalKeyboardKey.keyS) {
-      setKey(isDown, (v) => downPressed = v);
+
+    if (key == LogicalKeyboardKey.arrowDown ||
+        key == LogicalKeyboardKey.keyS) {
+      setKey((v) => downPressed = v);
       return KeyEventResult.handled;
     }
+
     if (key == LogicalKeyboardKey.space) {
       if (isDown) {
         firePressed = true;
         _fire();
       }
-      if (isUp) firePressed = false;
+      if (isUp) {
+        firePressed = false;
+      }
       return KeyEventResult.handled;
     }
+
     if (isDown && key == LogicalKeyboardKey.enter) {
       _handlePrimaryAction();
       return KeyEventResult.handled;
     }
+
     if (isDown && key == LogicalKeyboardKey.keyR) {
       if (phase == GamePhase.gameOver || phase == GamePhase.victory) {
         _restartCampaign();
@@ -559,13 +591,11 @@ void _startLoop() {
           final isMobileLayout = constraints.maxWidth < 900;
 
           return Focus(
-            
             autofocus: true,
             onKeyEvent: _onKey,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () {
-                
                 if (phase != GamePhase.playing) {
                   _handlePrimaryAction();
                 }
@@ -604,7 +634,10 @@ void _startLoop() {
                     left: 0,
                     right: 0,
                     child: SafeArea(
-                      child: _HudBar(hud: hud, missionName: mission.name),
+                      child: _HudBar(
+                        hud: hud,
+                        missionName: mission.name,
+                      ),
                     ),
                   ),
 
@@ -615,8 +648,10 @@ void _startLoop() {
                         subtitle: _overlaySubtitle(),
                         primaryLabel: _overlayButtonText(),
                         onPrimary: _handlePrimaryAction,
-                        secondaryLabel: _showRestartButton() ? 'Restart Campaign' : null,
-                        onSecondary: _showRestartButton() ? _restartCampaign : null,
+                        secondaryLabel:
+                            _showRestartButton() ? 'Restart Campaign' : null,
+                        onSecondary:
+                            _showRestartButton() ? _restartCampaign : null,
                         footer: _overlayFooterText(isMobileLayout),
                       ),
                     ),
@@ -656,17 +691,24 @@ void _startLoop() {
                     child: SafeArea(
                       child: Center(
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
                           decoration: BoxDecoration(
                             color: const Color(0x66000000),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0x22FFFFFF)),
+                            border:
+                                Border.all(color: const Color(0x22FFFFFF)),
                           ),
                           child: Text(
                             isMobileLayout
                                 ? 'Drag ship • Use FIRE button • Tap overlay buttons'
                                 : 'Move: WASD / Arrows • Fire: Space • Confirm: Enter • Restart: R',
-                            style: const TextStyle(fontSize: 12, color: Colors.white70),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.white70,
+                            ),
                           ),
                         ),
                       ),
@@ -772,7 +814,8 @@ class _HudBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final progress = hud.targetDistance == 0 ? 0.0 : hud.distance / hud.targetDistance;
+    final progress =
+        hud.targetDistance == 0 ? 0.0 : hud.distance / hud.targetDistance;
 
     return Padding(
       padding: const EdgeInsets.all(12),
@@ -880,7 +923,10 @@ class _OverlayCard extends StatelessWidget {
             decoration: BoxDecoration(
               color: const Color(0xFF0E1320),
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: const Color(0x3388AAFF), width: 1.5),
+              border: Border.all(
+                color: const Color(0x3388AAFF),
+                width: 1.5,
+              ),
               boxShadow: const [
                 BoxShadow(
                   blurRadius: 20,
@@ -905,7 +951,10 @@ class _OverlayCard extends StatelessWidget {
                 Text(
                   subtitle,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 16, color: Colors.white70),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    color: Colors.white70,
+                  ),
                 ),
                 const SizedBox(height: 20),
                 Wrap(
@@ -916,7 +965,10 @@ class _OverlayCard extends StatelessWidget {
                     ElevatedButton(
                       onPressed: onPrimary,
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
                         child: Text(primaryLabel),
                       ),
                     ),
@@ -924,7 +976,10 @@ class _OverlayCard extends StatelessWidget {
                       OutlinedButton(
                         onPressed: onSecondary,
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 12,
+                          ),
                           child: Text(secondaryLabel!),
                         ),
                       ),
@@ -934,7 +989,10 @@ class _OverlayCard extends StatelessWidget {
                 Text(
                   footer,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 13, color: Colors.white54),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Colors.white54,
+                  ),
                 ),
               ],
             ),
