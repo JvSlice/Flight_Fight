@@ -50,6 +50,7 @@ class _Obstacle {
   Color color;
   bool isEnemy;
   bool active;
+  int hp;
 
   _Obstacle({
     required this.x,
@@ -59,6 +60,7 @@ class _Obstacle {
     required this.color,
     required this.isEnemy,
     this.active = true,
+    this.hp = 1,
   });
 
   Rect get rect => Rect.fromLTWH(x, y, w, h);
@@ -74,7 +76,7 @@ class _Bullet {
   _Bullet({
     required this.x,
     required this.y,
-    this.w = 20,
+    this.w = 18,
     this.h = 4,
     this.active = true,
   });
@@ -113,8 +115,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   double playerX = 80;
   double playerY = 250;
-  final double playerW = 68;
-  final double playerH = 36;
+  final double playerW = 64;
+  final double playerH = 34;
 
   bool leftPressed = false;
   bool rightPressed = false;
@@ -144,8 +146,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
           Color(0xFFDFF5FF),
         ],
         goalDistance: 5000,
-        baseSpeed: 210,
-        spawnRate: 0.95,
+        baseSpeed: 220,
+        spawnRate: 0.92,
       ),
       _MissionData(
         name: 'Mission 2: Forest Run',
@@ -157,8 +159,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
           Color(0xFF29452C),
           Color(0xFF1D341F),
         ],
-        goalDistance: 6000,
-        baseSpeed: 230,
+        goalDistance: 6200,
+        baseSpeed: 240,
         spawnRate: 0.82,
       ),
       _MissionData(
@@ -171,8 +173,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
           Color(0xFFC78A4B),
           Color(0xFF9A6536),
         ],
-        goalDistance: 7000,
-        baseSpeed: 250,
+        goalDistance: 7400,
+        baseSpeed: 260,
         spawnRate: 0.72,
       ),
     ];
@@ -333,12 +335,12 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   void _spawnObstacles(double dt) {
     spawnTimer += dt;
-    final delay = max(0.30, mission.spawnRate / difficultyScale);
+    final delay = max(0.28, mission.spawnRate / difficultyScale);
 
     if (spawnTimer < delay) return;
     spawnTimer = 0;
 
-    final isEnemy = rng.nextDouble() < 0.45;
+    final isEnemy = rng.nextDouble() < 0.5;
     final laneY = 90 + rng.nextDouble() * max(120.0, _playSize.height - 220.0);
 
     if (isEnemy) {
@@ -350,6 +352,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
           h: 28,
           color: const Color(0xFFE16A6A),
           isEnemy: true,
+          hp: 2,
         ),
       );
     } else {
@@ -425,8 +428,17 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
         if (b.rect.overlaps(o.rect)) {
           b.active = false;
-          o.active = false;
-          score += o.isEnemy ? 130 : 40;
+
+          if (o.isEnemy) {
+            o.hp -= 1;
+            if (o.hp <= 0) {
+              o.active = false;
+              score += 130;
+            }
+          } else {
+            o.active = false;
+            score += 40;
+          }
         }
       }
 
@@ -444,18 +456,25 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   void _fire() {
     // HACKABLE NOTE:
-    // Lower this for faster fire rate. Raise bullet cap for more spam.
+    // Lower cooldown for more shooting.
+    // Raise bullet cap for heavier laser spam.
     if (fireCooldown > 0) return;
-    if (bullets.length > 10) return;
+    if (bullets.length > 12) return;
 
     bullets.add(
       _Bullet(
-        x: playerX + playerW - 4,
-        y: playerY + playerH / 2 - 2,
+        x: playerX + playerW - 2,
+        y: playerY + playerH * 0.35,
+      ),
+    );
+    bullets.add(
+      _Bullet(
+        x: playerX + playerW - 2,
+        y: playerY + playerH * 0.65 - 4,
       ),
     );
 
-    fireCooldown = 0.12;
+    fireCooldown = 0.10;
   }
 
   void _startMission() {
@@ -746,86 +765,42 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                     ),
                   ),
 
-                  // Cockpit frame
+                  // Simple cockpit overlay
                   IgnorePointer(
-                    child: Positioned.fill(
-                      child: Stack(
-                        children: [
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            height: 110,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: const Color(0x88081118),
-                                border: Border(
-                                  top: BorderSide(
-                                    color: mission.accent.withOpacity(0.28),
-                                    width: 2,
-                                  ),
+                    child: Stack(
+                      children: [
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          height: 110,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: const Color(0x66081118),
+                              border: Border(
+                                top: BorderSide(
+                                  color: mission.accent.withOpacity(0.25),
+                                  width: 2,
                                 ),
                               ),
                             ),
                           ),
-                          Positioned(
-                            left: 0,
-                            top: 0,
-                            bottom: 0,
-                            width: 42,
-                            child: Container(color: const Color(0x66081118)),
-                          ),
-                          Positioned(
-                            right: 0,
-                            top: 0,
-                            bottom: 0,
-                            width: 42,
-                            child: Container(color: const Color(0x66081118)),
-                          ),
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: 92,
-                            child: Center(
-                              child: Container(
-                                width: 140,
-                                height: 140,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: mission.accent.withOpacity(0.18),
-                                    width: 2,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: 162,
-                            child: Center(
-                              child: Container(
-                                width: 2,
-                                height: 24,
-                                color: mission.accent.withOpacity(0.18),
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: 148,
-                            child: Center(
-                              child: Container(
-                                width: 40,
-                                height: 2,
-                                color: mission.accent.withOpacity(0.18),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                        Positioned(
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: 32,
+                          child: Container(color: const Color(0x33081118)),
+                        ),
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: 32,
+                          child: Container(color: const Color(0x33081118)),
+                        ),
+                      ],
                     ),
                   ),
 
@@ -903,19 +878,19 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                       right: 20,
                       bottom: 20,
                       child: SafeArea(
-                        child: GestureDetector(
-                          onTapDown: (_) {
+                        child: Listener(
+                          onPointerDown: (_) {
                             setState(() {
                               firePressed = true;
                             });
                             _fire();
                           },
-                          onTapUp: (_) {
+                          onPointerUp: (_) {
                             setState(() {
                               firePressed = false;
                             });
                           },
-                          onTapCancel: () {
+                          onPointerCancel: (_) {
                             setState(() {
                               firePressed = false;
                             });
