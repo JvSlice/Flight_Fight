@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -18,70 +19,74 @@ enum _GamePhase {
   victory,
 }
 
+enum _ObjectKind {
+  tower,
+  tree,
+  rock,
+  drone,
+  battery,
+}
+
 class _MissionData {
   final String name;
   final String subtitle;
-  final Color bgTop;
-  final Color bgBottom;
+  final Color skyTop;
+  final Color skyBottom;
+  final Color groundNear;
+  final Color groundFar;
   final Color accent;
-  final List<Color> terrainColors;
   final int goalDistance;
   final double baseSpeed;
   final double spawnRate;
+  final double droneChance;
 
   const _MissionData({
     required this.name,
     required this.subtitle,
-    required this.bgTop,
-    required this.bgBottom,
+    required this.skyTop,
+    required this.skyBottom,
+    required this.groundNear,
+    required this.groundFar,
     required this.accent,
-    required this.terrainColors,
     required this.goalDistance,
     required this.baseSpeed,
     required this.spawnRate,
+    required this.droneChance,
   });
 }
 
-class _Obstacle {
-  double x;
-  double y;
-  double w;
-  double h;
-  Color color;
-  bool isEnemy;
+class _WorldObject {
+  _ObjectKind kind;
+  double laneX;
+  double z;
+  double width;
+  double height;
   bool active;
   int hp;
 
-  _Obstacle({
-    required this.x,
-    required this.y,
-    required this.w,
-    required this.h,
-    required this.color,
-    required this.isEnemy,
+  _WorldObject({
+    required this.kind,
+    required this.laneX,
+    required this.z,
+    required this.width,
+    required this.height,
+    required this.hp,
     this.active = true,
-    this.hp = 1,
   });
-
-  Rect get rect => Rect.fromLTWH(x, y, w, h);
 }
 
-class _Bullet {
-  double x;
-  double y;
-  double w;
-  double h;
+class _Shot {
+  double laneX;
+  double aimY;
+  double z;
   bool active;
 
-  _Bullet({
-    required this.x,
-    required this.y,
-    this.w = 18,
-    this.h = 4,
+  _Shot({
+    required this.laneX,
+    required this.aimY,
+    required this.z,
     this.active = true,
   });
-
-  Rect get rect => Rect.fromLTWH(x, y, w, h);
 }
 
 class _Star {
@@ -93,6 +98,20 @@ class _Star {
     required this.x,
     required this.y,
     required this.speed,
+  });
+}
+
+class _Explosion {
+  double laneX;
+  double y;
+  double t;
+  bool active;
+
+  _Explosion({
+    required this.laneX,
+    required this.y,
+    this.t = 0,
+    this.active = true,
   });
 }
 
@@ -108,27 +127,32 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   _GamePhase phase = _GamePhase.briefing;
   int missionIndex = 0;
   int score = 0;
-  int health = 100;
+  int hull = 100;
   double distance = 0;
   double spawnTimer = 0;
   double fireCooldown = 0;
+  double damageFlash = 0;
 
-  double playerX = 80;
-  double playerY = 250;
-  final double playerW = 64;
-  final double playerH = 34;
+  // HACKABLE NOTE:
+  // playerX is lateral movement in the flight corridor.
+  // playerY slightly adjusts the aiming / dodge feel, but this is
+  // still mainly a forward-run game, not a free-flight sim.
+  double playerX = 0;
+  double playerY = 0;
 
+  // input
   bool leftPressed = false;
   bool rightPressed = false;
   bool upPressed = false;
   bool downPressed = false;
   bool firePressed = false;
 
-  final List<_Obstacle> obstacles = [];
-  final List<_Bullet> bullets = [];
+  final List<_WorldObject> objects = [];
+  final List<_Shot> shots = [];
   final List<_Star> stars = [];
+  final List<_Explosion> explosions = [];
 
-  Size _playSize = const Size(1000, 600);
+  Size playSize = const Size(1000, 700);
 
   @override
   void initState() {
@@ -137,54 +161,51 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     missions = const [
       _MissionData(
         name: 'Mission 1: Ice Run',
-        subtitle: 'Fly low over the frozen world and survive the defense line.',
-        bgTop: Color(0xFF0E1F39),
-        bgBottom: Color(0xFF7DB8E8),
+        subtitle: 'Skim the frozen world and destroy the defense line.',
+        skyTop: Color(0xFF0E1A33),
+        skyBottom: Color(0xFF79B7E6),
+        groundNear: Color(0xFFDFF5FF),
+        groundFar: Color(0xFF9CC6E3),
         accent: Color(0xFFD9F3FF),
-        terrainColors: [
-          Color(0xFFB7D9F3),
-          Color(0xFFDFF5FF),
-        ],
-        goalDistance: 5000,
-        baseSpeed: 220,
-        spawnRate: 0.92,
+        goalDistance: 5400,
+        baseSpeed: 210,
+        spawnRate: 0.95,
+        droneChance: 0.28,
       ),
       _MissionData(
         name: 'Mission 2: Forest Run',
-        subtitle: 'Thread between giant trunks and hostile patrol craft.',
-        bgTop: Color(0xFF0E2012),
-        bgBottom: Color(0xFF4A7A56),
-        accent: Color(0xFF9BE58A),
-        terrainColors: [
-          Color(0xFF29452C),
-          Color(0xFF1D341F),
-        ],
-        goalDistance: 6200,
-        baseSpeed: 240,
-        spawnRate: 0.82,
+        subtitle: 'Thread the giant trunks and break through patrol craft.',
+        skyTop: Color(0xFF112015),
+        skyBottom: Color(0xFF4D7857),
+        groundNear: Color(0xFF243E27),
+        groundFar: Color(0xFF1A2E1D),
+        accent: Color(0xFFB6F5A0),
+        goalDistance: 6400,
+        baseSpeed: 225,
+        spawnRate: 0.86,
+        droneChance: 0.34,
       ),
       _MissionData(
         name: 'Mission 3: Desert Run',
-        subtitle: 'Push through heat, rock spires, and attack drones.',
-        bgTop: Color(0xFF422013),
-        bgBottom: Color(0xFFE6A45D),
+        subtitle: 'Push through rock spires, guns, and attack drones.',
+        skyTop: Color(0xFF3A1C12),
+        skyBottom: Color(0xFFE0A05D),
+        groundNear: Color(0xFFC98B4A),
+        groundFar: Color(0xFF966235),
         accent: Color(0xFFFFD27A),
-        terrainColors: [
-          Color(0xFFC78A4B),
-          Color(0xFF9A6536),
-        ],
-        goalDistance: 7400,
-        baseSpeed: 260,
-        spawnRate: 0.72,
+        goalDistance: 7600,
+        baseSpeed: 240,
+        spawnRate: 0.78,
+        droneChance: 0.38,
       ),
     ];
 
-    for (int i = 0; i < 60; i++) {
+    for (int i = 0; i < 65; i++) {
       stars.add(
         _Star(
-          x: rng.nextDouble() * 1000,
-          y: rng.nextDouble() * 600,
-          speed: 20 + rng.nextDouble() * 80,
+          x: rng.nextDouble(),
+          y: rng.nextDouble() * 0.55,
+          speed: 0.2 + rng.nextDouble() * 0.8,
         ),
       );
     }
@@ -193,9 +214,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     _startLoop();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _keyboardFocus.requestFocus();
-      }
+      if (mounted) _keyboardFocus.requestFocus();
     });
   }
 
@@ -215,7 +234,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   double get worldSpeed => mission.baseSpeed * difficultyScale;
 
-  Rect get playerRect => Rect.fromLTWH(playerX, playerY, playerW, playerH);
+  double get reticleX => playerX;
+  double get reticleY => playerY;
 
   void _startLoop() {
     _loop?.cancel();
@@ -241,26 +261,29 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     if (fullReset) {
       missionIndex = 0;
       score = 0;
-      health = 100;
       phase = _GamePhase.briefing;
+      hull = 100;
     } else {
-      health = min(100, health + 20);
+      hull = min(100, hull + 20);
       phase = _GamePhase.briefing;
     }
 
     distance = 0;
     spawnTimer = 0;
     fireCooldown = 0;
-    obstacles.clear();
-    bullets.clear();
+    damageFlash = 0;
+    playerX = 0;
+    playerY = 0;
 
-    playerX = 80;
-    playerY = 250;
     leftPressed = false;
     rightPressed = false;
     upPressed = false;
     downPressed = false;
     firePressed = false;
+
+    objects.clear();
+    shots.clear();
+    explosions.clear();
   }
 
   void _update(double dt) {
@@ -268,9 +291,21 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
     _updateStars(dt);
 
+    if (damageFlash > 0) {
+      damageFlash -= dt;
+    }
+
     if (fireCooldown > 0) {
       fireCooldown -= dt;
     }
+
+    for (final e in explosions) {
+      e.t += dt * 1.8;
+      if (e.t >= 1.0) {
+        e.active = false;
+      }
+    }
+    explosions.removeWhere((e) => !e.active);
 
     if (phase != _GamePhase.playing) {
       setState(() {});
@@ -278,16 +313,16 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     }
 
     _handleInput(dt);
-    _spawnObstacles(dt);
-    _updateObstacles(dt);
-    _updateBullets(dt);
+    _spawnWorld(dt);
+    _updateObjects(dt);
+    _updateShots(dt);
     _handleCollisions();
-    _cleanup();
+    _cleanupObjects();
 
     distance += worldSpeed * dt;
 
     if (distance >= mission.goalDistance) {
-      score += 1200 + missionIndex * 500;
+      score += 1400 + missionIndex * 600;
       if (missionIndex >= missions.length - 1) {
         phase = _GamePhase.victory;
       } else {
@@ -295,7 +330,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
       }
     }
 
-    if (health <= 0) {
+    if (hull <= 0) {
+      hull = 0;
       phase = _GamePhase.gameOver;
     }
 
@@ -303,178 +339,202 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   }
 
   void _updateStars(double dt) {
+    final speed = 0.06 + difficultyScale * 0.015;
     for (final s in stars) {
-      s.x -= s.speed * dt;
-      if (s.x < -4) {
-        s.x = _playSize.width + rng.nextDouble() * 40;
-        s.y = rng.nextDouble() * (_playSize.height * 0.68);
+      s.y += s.speed * speed * dt * 10;
+      if (s.y > 0.58) {
+        s.y = 0.0;
+        s.x = rng.nextDouble();
       }
     }
   }
 
   void _handleInput(double dt) {
-    const moveSpeed = 300.0;
+    const lateralSpeed = 1.6;
+    const verticalSpeed = 1.0;
 
-    if (leftPressed) playerX -= moveSpeed * dt;
-    if (rightPressed) playerX += moveSpeed * dt;
-    if (upPressed) playerY -= moveSpeed * dt;
-    if (downPressed) playerY += moveSpeed * dt;
+    if (leftPressed) playerX -= lateralSpeed * dt;
+    if (rightPressed) playerX += lateralSpeed * dt;
+    if (upPressed) playerY -= verticalSpeed * dt;
+    if (downPressed) playerY += verticalSpeed * dt;
+
+    playerX = playerX.clamp(-1.15, 1.15);
+    playerY = playerY.clamp(-0.35, 0.35);
 
     if (firePressed) {
       _fire();
     }
-
-    final minX = 20.0;
-    final maxX = max(20.0, _playSize.width - playerW - 20.0);
-    final minY = 70.0;
-    final maxY = max(70.0, _playSize.height - playerH - 110.0);
-
-    playerX = playerX.clamp(minX, maxX);
-    playerY = playerY.clamp(minY, maxY);
   }
 
-  void _spawnObstacles(double dt) {
+  void _spawnWorld(double dt) {
     spawnTimer += dt;
-    final delay = max(0.28, mission.spawnRate / difficultyScale);
 
+    final delay = max(0.26, mission.spawnRate / difficultyScale);
     if (spawnTimer < delay) return;
     spawnTimer = 0;
 
-    final isEnemy = rng.nextDouble() < 0.5;
-    final laneY = 90 + rng.nextDouble() * max(120.0, _playSize.height - 220.0);
+    final spawnDrone = rng.nextDouble() < mission.droneChance;
+    final lane = [-1.0, -0.65, -0.3, 0.0, 0.3, 0.65, 1.0][rng.nextInt(7)];
 
-    if (isEnemy) {
-      obstacles.add(
-        _Obstacle(
-          x: _playSize.width + 40,
-          y: laneY,
-          w: 46,
-          h: 28,
-          color: const Color(0xFFE16A6A),
-          isEnemy: true,
+    if (spawnDrone) {
+      objects.add(
+        _WorldObject(
+          kind: _ObjectKind.drone,
+          laneX: lane,
+          z: 0.06,
+          width: 0.12,
+          height: 0.10,
           hp: 2,
         ),
       );
-    } else {
-      switch (missionIndex) {
-        case 0:
-          obstacles.add(
-            _Obstacle(
-              x: _playSize.width + 40,
-              y: laneY - 35,
-              w: 28,
-              h: 130,
-              color: const Color(0xFFD7F2FF),
-              isEnemy: false,
-            ),
-          );
-          break;
-        case 1:
-          obstacles.add(
-            _Obstacle(
-              x: _playSize.width + 40,
-              y: laneY - 48,
-              w: 38,
-              h: 160,
-              color: const Color(0xFF5F3C22),
-              isEnemy: false,
-            ),
-          );
-          break;
-        case 2:
-          obstacles.add(
-            _Obstacle(
-              x: _playSize.width + 40,
-              y: laneY - 40,
-              w: 42,
-              h: 125,
-              color: const Color(0xFFB97B47),
-              isEnemy: false,
-            ),
-          );
-          break;
-      }
+      return;
+    }
+
+    switch (missionIndex) {
+      case 0:
+        objects.add(
+          _WorldObject(
+            kind: rng.nextBool() ? _ObjectKind.tower : _ObjectKind.battery,
+            laneX: lane,
+            z: 0.05,
+            width: 0.10,
+            height: 0.20,
+            hp: 1,
+          ),
+        );
+        break;
+      case 1:
+        objects.add(
+          _WorldObject(
+            kind: _ObjectKind.tree,
+            laneX: lane,
+            z: 0.05,
+            width: 0.12,
+            height: 0.26,
+            hp: 1,
+          ),
+        );
+        break;
+      case 2:
+        objects.add(
+          _WorldObject(
+            kind: rng.nextBool() ? _ObjectKind.rock : _ObjectKind.battery,
+            laneX: lane,
+            z: 0.05,
+            width: 0.12,
+            height: 0.22,
+            hp: 1,
+          ),
+        );
+        break;
     }
   }
 
-  void _updateObstacles(double dt) {
-    for (final o in obstacles) {
-      o.x -= worldSpeed * dt * (o.isEnemy ? 1.08 : 1.0);
+  void _updateObjects(double dt) {
+    final advance = dt * (0.30 + worldSpeed / 850.0);
+
+    for (final o in objects) {
+      o.z += advance * (o.kind == _ObjectKind.drone ? 1.15 : 1.0);
     }
   }
 
-  void _updateBullets(double dt) {
-    for (final b in bullets) {
-      b.x += 700 * dt;
-      if (b.x > _playSize.width + 40) {
-        b.active = false;
+  void _updateShots(double dt) {
+    for (final s in shots) {
+      s.z -= dt * 1.9;
+      if (s.z < 0.0) {
+        s.active = false;
       }
     }
   }
 
   void _handleCollisions() {
-    final pRect = playerRect;
-
-    for (final o in obstacles) {
+    for (final o in objects) {
       if (!o.active) continue;
 
-      if (o.rect.overlaps(pRect)) {
-        o.active = false;
-        health -= o.isEnemy ? 16 : 24;
+      // Player collision near foreground
+      if (o.z > 0.88) {
+        final xHit = (o.laneX - playerX).abs() < (o.width * 1.5);
+        if (xHit) {
+          o.active = false;
+          hull -= (o.kind == _ObjectKind.drone) ? 16 : 24;
+          damageFlash = 0.15;
+          explosions.add(
+            _Explosion(
+              laneX: o.laneX,
+              y: 0.78 + playerY * 0.08,
+            ),
+          );
+        }
       }
 
-      for (final b in bullets) {
-        if (!b.active || !o.active) continue;
+      for (final s in shots) {
+        if (!s.active || !o.active) continue;
 
-        if (b.rect.overlaps(o.rect)) {
-          b.active = false;
+        final zHit = (s.z - o.z).abs() < 0.07;
+        final xHit = (s.laneX - o.laneX).abs() < (o.width * 1.25);
+        final yBias = (s.aimY.abs() < 0.28) || o.kind != _ObjectKind.drone;
 
-          if (o.isEnemy) {
-            o.hp -= 1;
-            if (o.hp <= 0) {
-              o.active = false;
-              score += 130;
-            }
-          } else {
+        if (zHit && xHit && yBias) {
+          s.active = false;
+          o.hp -= 1;
+          if (o.hp <= 0) {
             o.active = false;
-            score += 40;
+            score += (o.kind == _ObjectKind.drone) ? 160 : 55;
+            explosions.add(
+              _Explosion(
+                laneX: o.laneX,
+                y: 0.58,
+              ),
+            );
           }
         }
       }
 
-      if (o.active && o.x + o.w < 0) {
+      if (o.active && o.z > 1.08) {
         o.active = false;
-        score += 5;
+        score += 4;
       }
     }
   }
 
-  void _cleanup() {
-    obstacles.removeWhere((o) => !o.active);
-    bullets.removeWhere((b) => !b.active);
+  void _cleanupObjects() {
+    objects.removeWhere((o) => !o.active);
+    shots.removeWhere((s) => !s.active);
   }
 
   void _fire() {
     // HACKABLE NOTE:
-    // Lower cooldown for more shooting.
-    // Raise bullet cap for heavier laser spam.
+    // Lower cooldown = more rapid fire.
+    // Raise shot cap = more laser spam.
+    if (phase != _GamePhase.playing) return;
     if (fireCooldown > 0) return;
-    if (bullets.length > 12) return;
+    if (shots.length > 12) return;
 
-    bullets.add(
-      _Bullet(
-        x: playerX + playerW - 2,
-        y: playerY + playerH * 0.35,
-      ),
-    );
-    bullets.add(
-      _Bullet(
-        x: playerX + playerW - 2,
-        y: playerY + playerH * 0.65 - 4,
+    shots.add(
+      _Shot(
+        laneX: reticleX,
+        aimY: reticleY,
+        z: 0.92,
       ),
     );
 
-    fireCooldown = 0.10;
+    shots.add(
+      _Shot(
+        laneX: (reticleX - 0.03).clamp(-1.2, 1.2),
+        aimY: reticleY,
+        z: 0.90,
+      ),
+    );
+
+    shots.add(
+      _Shot(
+        laneX: (reticleX + 0.03).clamp(-1.2, 1.2),
+        aimY: reticleY,
+        z: 0.90,
+      ),
+    );
+
+    fireCooldown = 0.09;
   }
 
   void _startMission() {
@@ -566,16 +626,26 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     }
   }
 
+  void _handleDrag(DragUpdateDetails details) {
+    final dx = details.delta.dx / max(1, playSize.width);
+    final dy = details.delta.dy / max(1, playSize.height);
+
+    setState(() {
+      playerX = (playerX + dx * 3.0).clamp(-1.15, 1.15);
+      playerY = (playerY + dy * 2.4).clamp(-0.35, 0.35);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        _playSize = Size(
+        playSize = Size(
           max(320, constraints.maxWidth),
           max(480, constraints.maxHeight),
         );
 
-        final isCompact = _playSize.width < 850;
+        final isCompact = playSize.width < 850;
 
         return KeyboardListener(
           focusNode: _keyboardFocus,
@@ -591,101 +661,30 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                   _keyboardFocus.requestFocus();
                 }
               },
-              onPanUpdate: phase == _GamePhase.playing
-                  ? (details) {
-                      setState(() {
-                        playerX += details.delta.dx;
-                        playerY += details.delta.dy;
-                      });
-                    }
-                  : null,
+              onPanUpdate: phase == _GamePhase.playing ? _handleDrag : null,
               child: Stack(
                 children: [
                   Positioned.fill(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            mission.bgTop,
-                            mission.bgBottom,
-                          ],
-                        ),
+                    child: CustomPaint(
+                      painter: _ForwardRunPainter(
+                        mission: mission,
+                        playerX: playerX,
+                        playerY: playerY,
+                        objects: objects,
+                        shots: shots,
+                        stars: stars,
+                        explosions: explosions,
+                        accent: mission.accent,
                       ),
                     ),
                   ),
 
-                  ...stars.map(
-                    (s) => Positioned(
-                      left: s.x,
-                      top: s.y,
+                  if (damageFlash > 0)
+                    Positioned.fill(
                       child: Container(
-                        width: 2,
-                        height: 2,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.7),
-                          shape: BoxShape.circle,
-                        ),
+                        color: Colors.red.withOpacity(0.10),
                       ),
                     ),
-                  ),
-
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    height: 145,
-                    child: Container(color: mission.terrainColors[0]),
-                  ),
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    height: 82,
-                    child: Container(color: mission.terrainColors[1]),
-                  ),
-
-                  ...obstacles.map((o) {
-                    return Positioned(
-                      left: o.x,
-                      top: o.y,
-                      child: o.isEnemy
-                          ? _EnemyWidget(width: o.w, height: o.h, color: o.color)
-                          : _ObstacleWidget(width: o.w, height: o.h, color: o.color),
-                    );
-                  }),
-
-                  ...bullets.map(
-                    (b) => Positioned(
-                      left: b.x,
-                      top: b.y,
-                      child: Container(
-                        width: b.w,
-                        height: b.h,
-                        decoration: BoxDecoration(
-                          color: mission.accent,
-                          borderRadius: BorderRadius.circular(999),
-                          boxShadow: [
-                            BoxShadow(
-                              blurRadius: 8,
-                              color: mission.accent.withOpacity(0.7),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  Positioned(
-                    left: playerX,
-                    top: playerY,
-                    child: _ShipWidget(
-                      width: playerW,
-                      height: playerH,
-                      accent: mission.accent,
-                    ),
-                  ),
 
                   Positioned(
                     left: 12,
@@ -727,13 +726,13 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                                   child: ClipRRect(
                                     borderRadius: BorderRadius.circular(999),
                                     child: LinearProgressIndicator(
-                                      value: health / 100,
+                                      value: hull / 100,
                                       minHeight: 10,
                                       backgroundColor: const Color(0x33222222),
                                       valueColor: AlwaysStoppedAnimation<Color>(
-                                        health > 50
+                                        hull > 50
                                             ? const Color(0xFF7FDBFF)
-                                            : health > 25
+                                            : hull > 25
                                                 ? const Color(0xFFFFC857)
                                                 : const Color(0xFFFF6B6B),
                                       ),
@@ -750,7 +749,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                                       minHeight: 10,
                                       backgroundColor: const Color(0x33222222),
                                       valueColor: const AlwaysStoppedAnimation<Color>(
-                                        Color(0xFFFFFFFF),
+                                        Colors.white,
                                       ),
                                     ),
                                   ),
@@ -765,52 +764,13 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                     ),
                   ),
 
-                  // Simple cockpit overlay
-                  IgnorePointer(
-                    child: Stack(
-                      children: [
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          height: 110,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: const Color(0x66081118),
-                              border: Border(
-                                top: BorderSide(
-                                  color: mission.accent.withOpacity(0.25),
-                                  width: 2,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        Positioned(
-                          left: 0,
-                          top: 0,
-                          bottom: 0,
-                          width: 32,
-                          child: Container(color: const Color(0x33081118)),
-                        ),
-                        Positioned(
-                          right: 0,
-                          top: 0,
-                          bottom: 0,
-                          width: 32,
-                          child: Container(color: const Color(0x33081118)),
-                        ),
-                      ],
-                    ),
-                  ),
-
                   if (phase != _GamePhase.playing)
                     Positioned.fill(
                       child: Container(
                         color: const Color(0x88000000),
                         child: Center(
                           child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 560),
+                            constraints: const BoxConstraints(maxWidth: 580),
                             child: Container(
                               margin: const EdgeInsets.all(20),
                               padding: const EdgeInsets.all(24),
@@ -857,7 +817,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                                   const SizedBox(height: 12),
                                   Text(
                                     isCompact
-                                        ? 'Touch: drag to move • hold FIRE'
+                                        ? 'Touch: drag to steer • hold FIRE'
                                         : 'Move: WASD / Arrows • Hold Space to fire • Enter to continue • R to restart',
                                     textAlign: TextAlign.center,
                                     style: const TextStyle(
@@ -880,20 +840,14 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                       child: SafeArea(
                         child: Listener(
                           onPointerDown: (_) {
-                            setState(() {
-                              firePressed = true;
-                            });
+                            setState(() => firePressed = true);
                             _fire();
                           },
                           onPointerUp: (_) {
-                            setState(() {
-                              firePressed = false;
-                            });
+                            setState(() => firePressed = false);
                           },
                           onPointerCancel: (_) {
-                            setState(() {
-                              firePressed = false;
-                            });
+                            setState(() => firePressed = false);
                           },
                           child: Container(
                             width: 96,
@@ -949,7 +903,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
       case _GamePhase.briefing:
         return mission.subtitle;
       case _GamePhase.missionComplete:
-        return 'Prepare for the next mission.\nScore: $score';
+        return 'Prepare for the next run.\nScore: $score';
       case _GamePhase.gameOver:
         return 'Your ship was destroyed.\nFinal score: $score';
       case _GamePhase.victory:
@@ -975,87 +929,400 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   }
 }
 
-class _ShipWidget extends StatelessWidget {
-  final double width;
-  final double height;
+class _ForwardRunPainter extends CustomPainter {
+  final _MissionData mission;
+  final double playerX;
+  final double playerY;
+  final List<_WorldObject> objects;
+  final List<_Shot> shots;
+  final List<_Star> stars;
+  final List<_Explosion> explosions;
   final Color accent;
 
-  const _ShipWidget({
-    required this.width,
-    required this.height,
+  _ForwardRunPainter({
+    required this.mission,
+    required this.playerX,
+    required this.playerY,
+    required this.objects,
+    required this.shots,
+    required this.stars,
+    required this.explosions,
     required this.accent,
   });
 
   @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: width,
-      height: height,
-      child: CustomPaint(
-        painter: _ShipPainter(accent: accent),
-      ),
-    );
-  }
-}
-
-class _ShipPainter extends CustomPainter {
-  final Color accent;
-
-  _ShipPainter({required this.accent});
-
-  @override
   void paint(Canvas canvas, Size size) {
-    final body = Paint()..color = const Color(0xFFE7EEF7);
-    final wing = Paint()..color = const Color(0xFF98AFC7);
-    final glass = Paint()..color = const Color(0xFF9EE7FF);
-    final glow = Paint()..color = accent.withOpacity(0.6);
+    _paintSky(canvas, size);
+    _paintStars(canvas, size);
+    _paintGround(canvas, size);
+    _paintHorizonBand(canvas, size);
+    _paintDistantScenery(canvas, size);
 
-    final bodyPath = Path()
-      ..moveTo(size.width * 0.08, size.height * 0.5)
-      ..lineTo(size.width * 0.55, size.height * 0.18)
-      ..lineTo(size.width * 0.92, size.height * 0.5)
-      ..lineTo(size.width * 0.55, size.height * 0.82)
+    final sorted = [...objects]..sort((a, b) => b.z.compareTo(a.z));
+    for (final o in sorted) {
+      _paintObject(canvas, size, o);
+    }
+
+    for (final s in shots) {
+      _paintShot(canvas, size, s);
+    }
+
+    for (final e in explosions) {
+      _paintExplosion(canvas, size, e);
+    }
+
+    _paintReticle(canvas, size);
+    _paintCockpit(canvas, size);
+  }
+
+  void _paintSky(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final p = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [mission.skyTop, mission.skyBottom],
+      ).createShader(rect);
+    canvas.drawRect(rect, p);
+  }
+
+  void _paintStars(Canvas canvas, Size size) {
+    final p = Paint()..color = Colors.white.withOpacity(0.7);
+    for (final s in stars) {
+      canvas.drawCircle(
+        Offset(s.x * size.width, s.y * size.height),
+        1.0 + s.speed * 0.4,
+        p,
+      );
+    }
+  }
+
+  void _paintGround(Canvas canvas, Size size) {
+    final horizonY = size.height * 0.42;
+
+    final path = Path()
+      ..moveTo(0, horizonY)
+      ..lineTo(size.width, horizonY)
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
       ..close();
 
-    final wingTop = Path()
-      ..moveTo(size.width * 0.18, size.height * 0.34)
-      ..lineTo(size.width * 0.02, size.height * 0.05)
-      ..lineTo(size.width * 0.36, size.height * 0.26)
-      ..close();
+    final p = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [mission.groundFar, mission.groundNear],
+      ).createShader(Rect.fromLTWH(0, horizonY, size.width, size.height - horizonY));
 
-    final wingBottom = Path()
-      ..moveTo(size.width * 0.18, size.height * 0.66)
-      ..lineTo(size.width * 0.02, size.height * 0.95)
-      ..lineTo(size.width * 0.36, size.height * 0.74)
-      ..close();
+    canvas.drawPath(path, p);
 
-    canvas.drawPath(wingTop, wing);
-    canvas.drawPath(wingBottom, wing);
-    canvas.drawPath(bodyPath, body);
+    final gridPaint = Paint()
+      ..color = Colors.white.withOpacity(0.08)
+      ..strokeWidth = 2;
 
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(size.width * 0.52, size.height * 0.5),
-        width: size.width * 0.18,
-        height: size.height * 0.24,
-      ),
-      glass,
+    final centerX = size.width / 2 + playerX * size.width * 0.10;
+
+    // corridor rails
+    canvas.drawLine(
+      Offset(centerX - size.width * 0.32, size.height),
+      Offset(centerX - size.width * 0.08, horizonY),
+      gridPaint,
+    );
+    canvas.drawLine(
+      Offset(centerX + size.width * 0.32, size.height),
+      Offset(centerX + size.width * 0.08, horizonY),
+      gridPaint,
     );
 
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(size.width * 0.04, size.height * 0.5),
-        width: size.width * 0.10,
-        height: size.height * 0.18,
-      ),
-      glow,
+    for (int i = 0; i < 8; i++) {
+      final t = i / 7;
+      final y = lerpDouble(horizonY + 16, size.height - 28, pow(t, 1.45).toDouble())!;
+      final halfW = lerpDouble(size.width * 0.03, size.width * 0.28, t)!;
+      canvas.drawLine(
+        Offset(centerX - halfW, y),
+        Offset(centerX + halfW, y),
+        gridPaint,
+      );
+    }
+  }
+
+  void _paintHorizonBand(Canvas canvas, Size size) {
+    final y = size.height * 0.42;
+    canvas.drawRect(
+      Rect.fromLTWH(0, y - 2, size.width, 4),
+      Paint()..color = Colors.white.withOpacity(0.10),
     );
+  }
+
+  void _paintDistantScenery(Canvas canvas, Size size) {
+    final horizonY = size.height * 0.42;
+
+    switch (mission.name) {
+      case 'Mission 1: Ice Run':
+        final path = Path()..moveTo(0, horizonY);
+        final peaks = [
+          Offset(size.width * 0.06, horizonY - 38),
+          Offset(size.width * 0.16, horizonY - 8),
+          Offset(size.width * 0.28, horizonY - 52),
+          Offset(size.width * 0.46, horizonY - 12),
+          Offset(size.width * 0.62, horizonY - 48),
+          Offset(size.width * 0.80, horizonY - 15),
+          Offset(size.width, horizonY - 38),
+        ];
+        for (final p in peaks) {
+          path.lineTo(p.dx, p.dy);
+        }
+        path.lineTo(size.width, horizonY);
+        path.close();
+        canvas.drawPath(path, Paint()..color = const Color(0x66E2F4FF));
+        break;
+
+      case 'Mission 2: Forest Run':
+        final p = Paint()..color = const Color(0x66273929);
+        for (int i = 0; i < 18; i++) {
+          final x = i / 17 * size.width;
+          final h = 24 + (i % 5) * 12.0;
+          final tri = Path()
+            ..moveTo(x - 12, horizonY)
+            ..lineTo(x, horizonY - h)
+            ..lineTo(x + 12, horizonY)
+            ..close();
+          canvas.drawPath(tri, p);
+        }
+        break;
+
+      case 'Mission 3: Desert Run':
+        final path = Path()..moveTo(0, horizonY);
+        for (int i = 0; i <= 8; i++) {
+          final x = i / 8 * size.width;
+          final y = horizonY - (sin(i * 0.9) * 10 + 8);
+          path.lineTo(x, y);
+        }
+        path.lineTo(size.width, horizonY);
+        path.close();
+        canvas.drawPath(path, Paint()..color = const Color(0x55FFD089));
+        break;
+    }
+  }
+
+  void _paintObject(Canvas canvas, Size size, _WorldObject o) {
+    final pos = _project(size, o.laneX, o.z, playerX, playerY);
+    final scale = _scaleForZ(o.z);
+    final w = size.width * o.width * scale;
+    final h = size.height * o.height * scale;
+
+    switch (o.kind) {
+      case _ObjectKind.tower:
+        final rect = Rect.fromCenter(
+          center: Offset(pos.dx, pos.dy - h * 0.5),
+          width: w,
+          height: h,
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(rect, const Radius.circular(6)),
+          Paint()..color = const Color(0xFFE6F7FF),
+        );
+        canvas.drawRect(
+          Rect.fromLTWH(rect.left + w * 0.18, rect.top + h * 0.08, w * 0.16, h * 0.82),
+          Paint()..color = Colors.white.withOpacity(0.22),
+        );
+        break;
+
+      case _ObjectKind.tree:
+        final trunk = Rect.fromCenter(
+          center: Offset(pos.dx, pos.dy - h * 0.30),
+          width: w * 0.22,
+          height: h * 0.58,
+        );
+        canvas.drawRect(trunk, Paint()..color = const Color(0xFF654321));
+        final crown = Path()
+          ..moveTo(pos.dx, pos.dy - h)
+          ..lineTo(pos.dx - w * 0.72, pos.dy - h * 0.28)
+          ..lineTo(pos.dx + w * 0.72, pos.dy - h * 0.28)
+          ..close();
+        canvas.drawPath(crown, Paint()..color = const Color(0xFF2D8A4D));
+        break;
+
+      case _ObjectKind.rock:
+        final path = Path()
+          ..moveTo(pos.dx - w * 0.55, pos.dy)
+          ..lineTo(pos.dx - w * 0.32, pos.dy - h * 0.66)
+          ..lineTo(pos.dx + w * 0.10, pos.dy - h * 0.88)
+          ..lineTo(pos.dx + w * 0.52, pos.dy - h * 0.30)
+          ..lineTo(pos.dx + w * 0.42, pos.dy)
+          ..close();
+        canvas.drawPath(path, Paint()..color = const Color(0xFFC18A58));
+        break;
+
+      case _ObjectKind.drone:
+        final bodyPaint = Paint()..color = const Color(0xFFE16A6A);
+        final wingPaint = Paint()..color = const Color(0xFFB84D4D);
+        final glass = Paint()..color = const Color(0xFFA7EEFF);
+
+        final body = RRect.fromRectAndRadius(
+          Rect.fromCenter(
+            center: Offset(pos.dx, pos.dy - h * 0.42),
+            width: w * 0.42,
+            height: h * 0.34,
+          ),
+          const Radius.circular(8),
+        );
+        canvas.drawRRect(body, bodyPaint);
+
+        final leftWing = Path()
+          ..moveTo(pos.dx - w * 0.15, pos.dy - h * 0.42)
+          ..lineTo(pos.dx - w * 0.9, pos.dy - h * 0.18)
+          ..lineTo(pos.dx - w * 0.32, pos.dy - h * 0.04)
+          ..close();
+        final rightWing = Path()
+          ..moveTo(pos.dx + w * 0.15, pos.dy - h * 0.42)
+          ..lineTo(pos.dx + w * 0.9, pos.dy - h * 0.18)
+          ..lineTo(pos.dx + w * 0.32, pos.dy - h * 0.04)
+          ..close();
+
+        canvas.drawPath(leftWing, wingPaint);
+        canvas.drawPath(rightWing, wingPaint);
+
+        canvas.drawOval(
+          Rect.fromCenter(
+            center: Offset(pos.dx, pos.dy - h * 0.46),
+            width: w * 0.14,
+            height: h * 0.12,
+          ),
+          glass,
+        );
+        break;
+
+      case _ObjectKind.battery:
+        final base = Rect.fromCenter(
+          center: Offset(pos.dx, pos.dy - h * 0.36),
+          width: w * 0.70,
+          height: h * 0.52,
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(base, const Radius.circular(5)),
+          Paint()..color = const Color(0xFF7D7D7D),
+        );
+
+        final barrel = Path()
+          ..moveTo(pos.dx + w * 0.06, pos.dy - h * 0.62)
+          ..lineTo(pos.dx + w * 0.60, pos.dy - h * 0.80)
+          ..lineTo(pos.dx + w * 0.54, pos.dy - h * 0.90)
+          ..lineTo(pos.dx, pos.dy - h * 0.70)
+          ..close();
+        canvas.drawPath(barrel, Paint()..color = const Color(0xFFBDBDBD));
+        break;
+    }
+  }
+
+  void _paintShot(Canvas canvas, Size size, _Shot s) {
+    final pos = _project(size, s.laneX, s.z, playerX, playerY);
+    final scale = _scaleForZ(s.z);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: pos,
+          width: size.width * 0.008 * scale + 3,
+          height: size.height * 0.030 * scale + 6,
+        ),
+        const Radius.circular(3),
+      ),
+      Paint()..color = accent,
+    );
+  }
+
+  void _paintExplosion(Canvas canvas, Size size, _Explosion e) {
+    final pos = _project(size, e.laneX, 0.82, playerX, playerY);
+    final r = 8 + e.t * 36;
+    final a = (1.0 - e.t).clamp(0.0, 1.0);
+    canvas.drawCircle(
+      Offset(pos.dx, lerpDouble(pos.dy, size.height * e.y, 0.65)!),
+      r,
+      Paint()..color = Colors.orange.withOpacity(a * 0.45),
+    );
+    canvas.drawCircle(
+      Offset(pos.dx, lerpDouble(pos.dy, size.height * e.y, 0.65)!),
+      r * 0.55,
+      Paint()..color = Colors.yellow.withOpacity(a * 0.82),
+    );
+  }
+
+  void _paintReticle(Canvas canvas, Size size) {
+    final center = Offset(
+      size.width * (0.5 + playerX * 0.14),
+      size.height * (0.56 + playerY * 0.12),
+    );
+
+    final p = Paint()
+      ..color = accent.withOpacity(0.30)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+
+    canvas.drawCircle(center, 18, p);
+    canvas.drawLine(Offset(center.dx - 28, center.dy), Offset(center.dx - 8, center.dy), p);
+    canvas.drawLine(Offset(center.dx + 8, center.dy), Offset(center.dx + 28, center.dy), p);
+    canvas.drawLine(Offset(center.dx, center.dy - 28), Offset(center.dx, center.dy - 8), p);
+    canvas.drawLine(Offset(center.dx, center.dy + 8), Offset(center.dx, center.dy + 28), p);
+  }
+
+  void _paintCockpit(Canvas canvas, Size size) {
+    final framePaint = Paint()..color = const Color(0x77081118);
+    final sidePaint = Paint()..color = const Color(0x33081118);
+    final linePaint = Paint()
+      ..color = accent.withOpacity(0.24)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+
+    canvas.drawRect(
+      Rect.fromLTWH(0, size.height - 112, size.width, 112),
+      framePaint,
+    );
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, 32, size.height),
+      sidePaint,
+    );
+    canvas.drawRect(
+      Rect.fromLTWH(size.width - 32, 0, 32, size.height),
+      sidePaint,
+    );
+
+    canvas.drawLine(
+      Offset(0, size.height - 112),
+      Offset(size.width, size.height - 112),
+      linePaint,
+    );
+
+    final circleCenter = Offset(size.width * 0.5, size.height - 128);
+    canvas.drawCircle(circleCenter, 54, linePaint);
+    canvas.drawLine(
+      Offset(circleCenter.dx - 18, circleCenter.dy),
+      Offset(circleCenter.dx + 18, circleCenter.dy),
+      linePaint,
+    );
+    canvas.drawLine(
+      Offset(circleCenter.dx, circleCenter.dy - 18),
+      Offset(circleCenter.dx, circleCenter.dy + 18),
+      linePaint,
+    );
+  }
+
+  Offset _project(Size size, double laneX, double z, double playerX, double playerY) {
+    final horizonY = size.height * 0.42;
+    final bottomY = size.height * (0.88 + playerY * 0.03);
+    final scale = _scaleForZ(z);
+
+    final screenX = size.width * (0.5 + (laneX - playerX * 0.55) * 0.33 * scale);
+    final screenY = lerpDouble(horizonY, bottomY, scale)!;
+
+    return Offset(screenX, screenY);
+  }
+
+  double _scaleForZ(double z) {
+    return (1.0 - z).clamp(0.06, 1.0);
   }
 
   @override
-  bool shouldRepaint(covariant _ShipPainter oldDelegate) {
-    return oldDelegate.accent != accent;
-  }
+  bool shouldRepaint(covariant _ForwardRunPainter oldDelegate) => true;
 }
 
 class _EnemyWidget extends StatelessWidget {
