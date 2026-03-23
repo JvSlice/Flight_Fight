@@ -74,7 +74,7 @@ class _Bullet {
   _Bullet({
     required this.x,
     required this.y,
-    this.w = 18,
+    this.w = 20,
     this.h = 4,
     this.active = true,
   });
@@ -109,26 +109,23 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   int health = 100;
   double distance = 0;
   double spawnTimer = 0;
+  double fireCooldown = 0;
 
-  // Player
   double playerX = 80;
   double playerY = 250;
-  final double playerW = 64;
-  final double playerH = 34;
+  final double playerW = 68;
+  final double playerH = 36;
 
-  // Input
   bool leftPressed = false;
   bool rightPressed = false;
   bool upPressed = false;
   bool downPressed = false;
   bool firePressed = false;
 
-  // World
   final List<_Obstacle> obstacles = [];
   final List<_Bullet> bullets = [];
   final List<_Star> stars = [];
 
-  // Track playable area
   Size _playSize = const Size(1000, 600);
 
   @override
@@ -138,7 +135,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     missions = const [
       _MissionData(
         name: 'Mission 1: Ice Run',
-        subtitle: 'Fly low over a frozen world and avoid the towers.',
+        subtitle: 'Fly low over the frozen world and survive the defense line.',
         bgTop: Color(0xFF0E1F39),
         bgBottom: Color(0xFF7DB8E8),
         accent: Color(0xFFD9F3FF),
@@ -146,8 +143,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
           Color(0xFFB7D9F3),
           Color(0xFFDFF5FF),
         ],
-        goalDistance: 2400,
-        baseSpeed: 300,
+        goalDistance: 5000,
+        baseSpeed: 210,
         spawnRate: 0.95,
       ),
       _MissionData(
@@ -160,9 +157,9 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
           Color(0xFF29452C),
           Color(0xFF1D341F),
         ],
-        goalDistance: 3000,
-        baseSpeed: 340,
-        spawnRate: 0.80,
+        goalDistance: 6000,
+        baseSpeed: 230,
+        spawnRate: 0.82,
       ),
       _MissionData(
         name: 'Mission 3: Desert Run',
@@ -174,14 +171,12 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
           Color(0xFFC78A4B),
           Color(0xFF9A6536),
         ],
-        goalDistance: 3600,
-        baseSpeed: 380,
-        spawnRate: 0.68,
+        goalDistance: 7000,
+        baseSpeed: 250,
+        spawnRate: 0.72,
       ),
     ];
 
-    // HACKABLE NOTE:
-    // Stars are just lightweight background motion to give speed feeling.
     for (int i = 0; i < 60; i++) {
       stars.add(
         _Star(
@@ -213,7 +208,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   double get difficultyScale {
     final pct = distance / mission.goalDistance;
-    return 1.0 + pct.clamp(0.0, 1.0) * 0.9;
+    return 1.0 + pct.clamp(0.0, 1.0) * 0.45;
   }
 
   double get worldSpeed => mission.baseSpeed * difficultyScale;
@@ -253,6 +248,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
     distance = 0;
     spawnTimer = 0;
+    fireCooldown = 0;
     obstacles.clear();
     bullets.clear();
 
@@ -270,6 +266,10 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
     _updateStars(dt);
 
+    if (fireCooldown > 0) {
+      fireCooldown -= dt;
+    }
+
     if (phase != _GamePhase.playing) {
       setState(() {});
       return;
@@ -285,7 +285,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     distance += worldSpeed * dt;
 
     if (distance >= mission.goalDistance) {
-      score += 1000 + missionIndex * 500;
+      score += 1200 + missionIndex * 500;
       if (missionIndex >= missions.length - 1) {
         phase = _GamePhase.victory;
       } else {
@@ -305,13 +305,13 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
       s.x -= s.speed * dt;
       if (s.x < -4) {
         s.x = _playSize.width + rng.nextDouble() * 40;
-        s.y = rng.nextDouble() * (_playSize.height * 0.7);
+        s.y = rng.nextDouble() * (_playSize.height * 0.68);
       }
     }
   }
 
   void _handleInput(double dt) {
-    const moveSpeed = 340.0;
+    const moveSpeed = 300.0;
 
     if (leftPressed) playerX -= moveSpeed * dt;
     if (rightPressed) playerX += moveSpeed * dt;
@@ -325,7 +325,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     final minX = 20.0;
     final maxX = max(20.0, _playSize.width - playerW - 20.0);
     final minY = 70.0;
-    final maxY = max(70.0, _playSize.height - playerH - 80.0);
+    final maxY = max(70.0, _playSize.height - playerH - 110.0);
 
     playerX = playerX.clamp(minX, maxX);
     playerY = playerY.clamp(minY, maxY);
@@ -333,20 +333,20 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   void _spawnObstacles(double dt) {
     spawnTimer += dt;
-    final delay = max(0.28, mission.spawnRate / difficultyScale);
+    final delay = max(0.30, mission.spawnRate / difficultyScale);
 
     if (spawnTimer < delay) return;
     spawnTimer = 0;
 
-    final isEnemy = rng.nextDouble() < 0.35;
-    final laneY = 90 + rng.nextDouble() * max(120.0, _playSize.height - 180.0);
+    final isEnemy = rng.nextDouble() < 0.45;
+    final laneY = 90 + rng.nextDouble() * max(120.0, _playSize.height - 220.0);
 
     if (isEnemy) {
       obstacles.add(
         _Obstacle(
           x: _playSize.width + 40,
           y: laneY,
-          w: 44,
+          w: 46,
           h: 28,
           color: const Color(0xFFE16A6A),
           isEnemy: true,
@@ -358,9 +358,9 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
           obstacles.add(
             _Obstacle(
               x: _playSize.width + 40,
-              y: laneY - 30,
+              y: laneY - 35,
               w: 28,
-              h: 120,
+              h: 130,
               color: const Color(0xFFD7F2FF),
               isEnemy: false,
             ),
@@ -370,9 +370,9 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
           obstacles.add(
             _Obstacle(
               x: _playSize.width + 40,
-              y: laneY - 45,
-              w: 36,
-              h: 150,
+              y: laneY - 48,
+              w: 38,
+              h: 160,
               color: const Color(0xFF5F3C22),
               isEnemy: false,
             ),
@@ -382,9 +382,9 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
           obstacles.add(
             _Obstacle(
               x: _playSize.width + 40,
-              y: laneY - 35,
-              w: 40,
-              h: 110,
+              y: laneY - 40,
+              w: 42,
+              h: 125,
               color: const Color(0xFFB97B47),
               isEnemy: false,
             ),
@@ -396,7 +396,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   void _updateObstacles(double dt) {
     for (final o in obstacles) {
-      o.x -= worldSpeed * dt * (o.isEnemy ? 1.12 : 1.0);
+      o.x -= worldSpeed * dt * (o.isEnemy ? 1.08 : 1.0);
     }
   }
 
@@ -417,7 +417,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
       if (o.rect.overlaps(pRect)) {
         o.active = false;
-        health -= o.isEnemy ? 18 : 24;
+        health -= o.isEnemy ? 16 : 24;
       }
 
       for (final b in bullets) {
@@ -426,7 +426,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
         if (b.rect.overlaps(o.rect)) {
           b.active = false;
           o.active = false;
-          score += o.isEnemy ? 125 : 35;
+          score += o.isEnemy ? 130 : 40;
         }
       }
 
@@ -444,18 +444,18 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   void _fire() {
     // HACKABLE NOTE:
-    // This caps bullet spam to keep the game lightweight and readable.
-    if (bullets.length > 6) return;
+    // Lower this for faster fire rate. Raise bullet cap for more spam.
+    if (fireCooldown > 0) return;
+    if (bullets.length > 10) return;
 
-    final newBullet = _Bullet(
-      x: playerX + playerW - 2,
-      y: playerY + playerH / 2 - 2,
+    bullets.add(
+      _Bullet(
+        x: playerX + playerW - 4,
+        y: playerY + playerH / 2 - 2,
+      ),
     );
 
-    final tooClose = bullets.any((b) => (b.x - newBullet.x).abs() < 28);
-    if (!tooClose) {
-      bullets.add(newBullet);
-    }
+    fireCooldown = 0.12;
   }
 
   void _startMission() {
@@ -597,7 +597,6 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                     ),
                   ),
 
-                  // Background stars
                   ...stars.map(
                     (s) => Positioned(
                       left: s.x,
@@ -613,34 +612,21 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                     ),
                   ),
 
-                  // Terrain bands
                   Positioned(
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    height: 130,
+                    height: 145,
                     child: Container(color: mission.terrainColors[0]),
                   ),
                   Positioned(
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    height: 70,
+                    height: 82,
                     child: Container(color: mission.terrainColors[1]),
                   ),
 
-                  // Player ship
-                  Positioned(
-                    left: playerX,
-                    top: playerY,
-                    child: _ShipWidget(
-                      width: playerW,
-                      height: playerH,
-                      accent: mission.accent,
-                    ),
-                  ),
-
-                  // Obstacles and enemies
                   ...obstacles.map((o) {
                     return Positioned(
                       left: o.x,
@@ -651,7 +637,6 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                     );
                   }),
 
-                  // Bullets
                   ...bullets.map(
                     (b) => Positioned(
                       left: b.x,
@@ -673,7 +658,16 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                     ),
                   ),
 
-                  // HUD
+                  Positioned(
+                    left: playerX,
+                    top: playerY,
+                    child: _ShipWidget(
+                      width: playerW,
+                      height: playerH,
+                      accent: mission.accent,
+                    ),
+                  ),
+
                   Positioned(
                     left: 12,
                     right: 12,
@@ -752,7 +746,89 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                     ),
                   ),
 
-                  // Overlay screens
+                  // Cockpit frame
+                  IgnorePointer(
+                    child: Positioned.fill(
+                      child: Stack(
+                        children: [
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            height: 110,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: const Color(0x88081118),
+                                border: Border(
+                                  top: BorderSide(
+                                    color: mission.accent.withOpacity(0.28),
+                                    width: 2,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: 42,
+                            child: Container(color: const Color(0x66081118)),
+                          ),
+                          Positioned(
+                            right: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: 42,
+                            child: Container(color: const Color(0x66081118)),
+                          ),
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 92,
+                            child: Center(
+                              child: Container(
+                                width: 140,
+                                height: 140,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: mission.accent.withOpacity(0.18),
+                                    width: 2,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 162,
+                            child: Center(
+                              child: Container(
+                                width: 2,
+                                height: 24,
+                                color: mission.accent.withOpacity(0.18),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 148,
+                            child: Center(
+                              child: Container(
+                                width: 40,
+                                height: 2,
+                                color: mission.accent.withOpacity(0.18),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
                   if (phase != _GamePhase.playing)
                     Positioned.fill(
                       child: Container(
@@ -806,8 +882,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                                   const SizedBox(height: 12),
                                   Text(
                                     isCompact
-                                        ? 'Touch: drag to move • tap screen to continue'
-                                        : 'Move: WASD / Arrows • Fire: Space • Enter: Continue • R: Restart',
+                                        ? 'Touch: drag to move • hold FIRE'
+                                        : 'Move: WASD / Arrows • Hold Space to fire • Enter to continue • R to restart',
                                     textAlign: TextAlign.center,
                                     style: const TextStyle(
                                       fontSize: 13,
@@ -822,20 +898,36 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                       ),
                     ),
 
-                  // Mobile fire button
                   if (isCompact && phase == _GamePhase.playing)
                     Positioned(
                       right: 20,
-                      bottom: 24,
+                      bottom: 20,
                       child: SafeArea(
                         child: GestureDetector(
-                          onTap: _fire,
+                          onTapDown: (_) {
+                            setState(() {
+                              firePressed = true;
+                            });
+                            _fire();
+                          },
+                          onTapUp: (_) {
+                            setState(() {
+                              firePressed = false;
+                            });
+                          },
+                          onTapCancel: () {
+                            setState(() {
+                              firePressed = false;
+                            });
+                          },
                           child: Container(
-                            width: 92,
-                            height: 92,
+                            width: 96,
+                            height: 96,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: const Color(0x33FFC857),
+                              color: firePressed
+                                  ? const Color(0x66FFC857)
+                                  : const Color(0x33FFC857),
                               border: Border.all(
                                 color: const Color(0xAAFFC857),
                                 width: 2,
