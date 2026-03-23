@@ -58,7 +58,11 @@ class _MissionData {
 class _WorldObject {
   _ObjectKind kind;
   double laneX;
+
+  /// 0.0 = horizon / far away
+  /// 1.0 = near player / foreground
   double z;
+
   double width;
   double height;
   bool active;
@@ -78,6 +82,8 @@ class _WorldObject {
 class _Shot {
   double laneX;
   double aimY;
+
+  /// shots start near the player and travel toward the horizon
   double z;
   bool active;
 
@@ -134,13 +140,10 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   double damageFlash = 0;
 
   // HACKABLE NOTE:
-  // playerX is lateral movement in the flight corridor.
-  // playerY slightly adjusts the aiming / dodge feel, but this is
-  // still mainly a forward-run game, not a free-flight sim.
+  // Mostly lateral movement. This is a forward-run game.
   double playerX = 0;
   double playerY = 0;
 
-  // input
   bool leftPressed = false;
   bool rightPressed = false;
   bool upPressed = false;
@@ -434,12 +437,15 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     final advance = dt * (0.30 + worldSpeed / 850.0);
 
     for (final o in objects) {
+      // FIXED:
+      // Objects now move from horizon (0.0) toward player (1.0)
       o.z += advance * (o.kind == _ObjectKind.drone ? 1.15 : 1.0);
     }
   }
 
   void _updateShots(double dt) {
     for (final s in shots) {
+      // shots travel forward toward the horizon / distance
       s.z -= dt * 1.9;
       if (s.z < 0.0) {
         s.active = false;
@@ -451,7 +457,6 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     for (final o in objects) {
       if (!o.active) continue;
 
-      // Player collision near foreground
       if (o.z > 0.88) {
         final xHit = (o.laneX - playerX).abs() < (o.width * 1.5);
         if (xHit) {
@@ -504,8 +509,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   void _fire() {
     // HACKABLE NOTE:
-    // Lower cooldown = more rapid fire.
-    // Raise shot cap = more laser spam.
+    // Lower cooldown = faster rate of fire.
     if (phase != _GamePhase.playing) return;
     if (fireCooldown > 0) return;
     if (shots.length > 12) return;
@@ -958,7 +962,7 @@ class _ForwardRunPainter extends CustomPainter {
     _paintHorizonBand(canvas, size);
     _paintDistantScenery(canvas, size);
 
-    final sorted = [...objects]..sort((a, b) => b.z.compareTo(a.z));
+    final sorted = [...objects]..sort((a, b) => a.z.compareTo(b.z));
     for (final o in sorted) {
       _paintObject(canvas, size, o);
     }
@@ -1022,7 +1026,6 @@ class _ForwardRunPainter extends CustomPainter {
 
     final centerX = size.width / 2 + playerX * size.width * 0.10;
 
-    // corridor rails
     canvas.drawLine(
       Offset(centerX - size.width * 0.32, size.height),
       Offset(centerX - size.width * 0.08, horizonY),
@@ -1217,7 +1220,7 @@ class _ForwardRunPainter extends CustomPainter {
 
   void _paintShot(Canvas canvas, Size size, _Shot s) {
     final pos = _project(size, s.laneX, s.z, playerX, playerY);
-    final scale = _scaleForZ(s.z);
+    final scale = _scaleForShotZ(s.z);
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromCenter(
@@ -1309,6 +1312,9 @@ class _ForwardRunPainter extends CustomPainter {
   Offset _project(Size size, double laneX, double z, double playerX, double playerY) {
     final horizonY = size.height * 0.42;
     final bottomY = size.height * (0.88 + playerY * 0.03);
+
+    // FIXED:
+    // z now grows toward the player, so scale uses z directly.
     final scale = _scaleForZ(z);
 
     final screenX = size.width * (0.5 + (laneX - playerX * 0.55) * 0.33 * scale);
@@ -1318,89 +1324,13 @@ class _ForwardRunPainter extends CustomPainter {
   }
 
   double _scaleForZ(double z) {
-    return (1.0 - z).clamp(0.06, 1.0);
+    return z.clamp(0.06, 1.0);
+  }
+
+  double _scaleForShotZ(double z) {
+    return z.clamp(0.06, 1.0);
   }
 
   @override
   bool shouldRepaint(covariant _ForwardRunPainter oldDelegate) => true;
-}
-
-class _EnemyWidget extends StatelessWidget {
-  final double width;
-  final double height;
-  final Color color;
-
-  const _EnemyWidget({
-    required this.width,
-    required this.height,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(
-      size: Size(width, height),
-      painter: _EnemyPainter(color: color),
-    );
-  }
-}
-
-class _EnemyPainter extends CustomPainter {
-  final Color color;
-
-  _EnemyPainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final body = Paint()..color = color;
-    final detail = Paint()..color = const Color(0xFF2B1D1D);
-
-    final p = Path()
-      ..moveTo(size.width * 0.1, size.height * 0.5)
-      ..lineTo(size.width * 0.42, size.height * 0.18)
-      ..lineTo(size.width * 0.9, size.height * 0.5)
-      ..lineTo(size.width * 0.42, size.height * 0.82)
-      ..close();
-
-    canvas.drawPath(p, body);
-    canvas.drawCircle(
-      Offset(size.width * 0.44, size.height * 0.5),
-      size.height * 0.12,
-      detail,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _EnemyPainter oldDelegate) => false;
-}
-
-class _ObstacleWidget extends StatelessWidget {
-  final double width;
-  final double height;
-  final Color color;
-
-  const _ObstacleWidget({
-    required this.width,
-    required this.height,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(6),
-        boxShadow: const [
-          BoxShadow(
-            blurRadius: 6,
-            color: Color(0x22000000),
-            offset: Offset(2, 3),
-          ),
-        ],
-      ),
-    );
-  }
 }
