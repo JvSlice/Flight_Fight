@@ -83,7 +83,7 @@ class _Shot {
   double laneX;
   double aimY;
 
-  /// shots start near the player and travel toward the horizon
+  /// starts near player and travels toward horizon
   double z;
   bool active;
 
@@ -140,9 +140,12 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   double damageFlash = 0;
 
   // HACKABLE NOTE:
-  // Mostly lateral movement. This is a forward-run game.
+  // targetPlayerX/Y are what the controls want.
+  // playerX/Y ease toward them for better arcade flight feel.
   double playerX = 0;
   double playerY = 0;
+  double targetPlayerX = 0;
+  double targetPlayerY = 0;
 
   bool leftPressed = false;
   bool rightPressed = false;
@@ -275,8 +278,11 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     spawnTimer = 0;
     fireCooldown = 0;
     damageFlash = 0;
+
     playerX = 0;
     playerY = 0;
+    targetPlayerX = 0;
+    targetPlayerY = 0;
 
     leftPressed = false;
     rightPressed = false;
@@ -353,16 +359,23 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   }
 
   void _handleInput(double dt) {
-    const lateralSpeed = 1.6;
-    const verticalSpeed = 1.0;
+    const lateralSpeed = 1.7;
+    const verticalSpeed = 0.95;
 
-    if (leftPressed) playerX -= lateralSpeed * dt;
-    if (rightPressed) playerX += lateralSpeed * dt;
-    if (upPressed) playerY -= verticalSpeed * dt;
-    if (downPressed) playerY += verticalSpeed * dt;
+    if (leftPressed) targetPlayerX -= lateralSpeed * dt;
+    if (rightPressed) targetPlayerX += lateralSpeed * dt;
+    if (upPressed) targetPlayerY -= verticalSpeed * dt;
+    if (downPressed) targetPlayerY += verticalSpeed * dt;
 
-    playerX = playerX.clamp(-1.15, 1.15);
-    playerY = playerY.clamp(-0.35, 0.35);
+    // HACKABLE NOTE:
+    // Narrower corridor = more attack-run feel.
+    targetPlayerX = targetPlayerX.clamp(-0.95, 0.95);
+    targetPlayerY = targetPlayerY.clamp(-0.26, 0.26);
+
+    // Smooth follow so the ship feels like it has a little weight.
+    final follow = min(1.0, dt * 8.5);
+    playerX = lerpDouble(playerX, targetPlayerX, follow)!;
+    playerY = lerpDouble(playerY, targetPlayerY, follow)!;
 
     if (firePressed) {
       _fire();
@@ -377,7 +390,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     spawnTimer = 0;
 
     final spawnDrone = rng.nextDouble() < mission.droneChance;
-    final lane = [-1.0, -0.65, -0.3, 0.0, 0.3, 0.65, 1.0][rng.nextInt(7)];
+    final lane = [-0.9, -0.6, -0.3, 0.0, 0.3, 0.6, 0.9][rng.nextInt(7)];
 
     if (spawnDrone) {
       objects.add(
@@ -385,8 +398,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
           kind: _ObjectKind.drone,
           laneX: lane,
           z: 0.06,
-          width: 0.12,
-          height: 0.10,
+          width: 0.10,
+          height: 0.09,
           hp: 2,
         ),
       );
@@ -400,8 +413,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
             kind: rng.nextBool() ? _ObjectKind.tower : _ObjectKind.battery,
             laneX: lane,
             z: 0.05,
-            width: 0.10,
-            height: 0.20,
+            width: 0.09,
+            height: 0.19,
             hp: 1,
           ),
         );
@@ -412,8 +425,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
             kind: _ObjectKind.tree,
             laneX: lane,
             z: 0.05,
-            width: 0.12,
-            height: 0.26,
+            width: 0.11,
+            height: 0.25,
             hp: 1,
           ),
         );
@@ -424,8 +437,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
             kind: rng.nextBool() ? _ObjectKind.rock : _ObjectKind.battery,
             laneX: lane,
             z: 0.05,
-            width: 0.12,
-            height: 0.22,
+            width: 0.11,
+            height: 0.21,
             hp: 1,
           ),
         );
@@ -437,15 +450,12 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     final advance = dt * (0.30 + worldSpeed / 850.0);
 
     for (final o in objects) {
-      // FIXED:
-      // Objects now move from horizon (0.0) toward player (1.0)
-      o.z += advance * (o.kind == _ObjectKind.drone ? 1.15 : 1.0);
+      o.z += advance * (o.kind == _ObjectKind.drone ? 1.10 : 1.0);
     }
   }
 
   void _updateShots(double dt) {
     for (final s in shots) {
-      // shots travel forward toward the horizon / distance
       s.z -= dt * 1.9;
       if (s.z < 0.0) {
         s.active = false;
@@ -457,16 +467,19 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     for (final o in objects) {
       if (!o.active) continue;
 
-      if (o.z > 0.88) {
-        final xHit = (o.laneX - playerX).abs() < (o.width * 1.5);
+      // HACKABLE NOTE:
+      // This is the player collision width.
+      // Lower value = tighter / fairer dodging.
+      if (o.z > 0.90) {
+        final xHit = (o.laneX - playerX).abs() < (o.width * 0.92);
         if (xHit) {
           o.active = false;
-          hull -= (o.kind == _ObjectKind.drone) ? 16 : 24;
+          hull -= (o.kind == _ObjectKind.drone) ? 15 : 22;
           damageFlash = 0.15;
           explosions.add(
             _Explosion(
               laneX: o.laneX,
-              y: 0.78 + playerY * 0.08,
+              y: 0.78 + playerY * 0.06,
             ),
           );
         }
@@ -475,9 +488,14 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
       for (final s in shots) {
         if (!s.active || !o.active) continue;
 
-        final zHit = (s.z - o.z).abs() < 0.07;
-        final xHit = (s.laneX - o.laneX).abs() < (o.width * 1.25);
-        final yBias = (s.aimY.abs() < 0.28) || o.kind != _ObjectKind.drone;
+        final zHit = (s.z - o.z).abs() < 0.06;
+
+        // HACKABLE NOTE:
+        // This is the shot hit width.
+        // Lower value = more precise aiming.
+        final xHit = (s.laneX - o.laneX).abs() < (o.width * 0.78);
+
+        final yBias = (s.aimY.abs() < 0.24) || o.kind != _ObjectKind.drone;
 
         if (zHit && xHit && yBias) {
           s.active = false;
@@ -509,7 +527,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   void _fire() {
     // HACKABLE NOTE:
-    // Lower cooldown = faster rate of fire.
+    // Lower cooldown = faster fire rate.
     if (phase != _GamePhase.playing) return;
     if (fireCooldown > 0) return;
     if (shots.length > 12) return;
@@ -524,7 +542,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
     shots.add(
       _Shot(
-        laneX: (reticleX - 0.03).clamp(-1.2, 1.2),
+        laneX: (reticleX - 0.025).clamp(-1.0, 1.0),
         aimY: reticleY,
         z: 0.90,
       ),
@@ -532,7 +550,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
     shots.add(
       _Shot(
-        laneX: (reticleX + 0.03).clamp(-1.2, 1.2),
+        laneX: (reticleX + 0.025).clamp(-1.0, 1.0),
         aimY: reticleY,
         z: 0.90,
       ),
@@ -635,8 +653,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     final dy = details.delta.dy / max(1, playSize.height);
 
     setState(() {
-      playerX = (playerX + dx * 3.0).clamp(-1.15, 1.15);
-      playerY = (playerY + dy * 2.4).clamp(-0.35, 0.35);
+      targetPlayerX = (targetPlayerX + dx * 2.6).clamp(-0.95, 0.95);
+      targetPlayerY = (targetPlayerY + dy * 2.0).clamp(-0.26, 0.26);
     });
   }
 
@@ -1024,15 +1042,15 @@ class _ForwardRunPainter extends CustomPainter {
       ..color = Colors.white.withOpacity(0.08)
       ..strokeWidth = 2;
 
-    final centerX = size.width / 2 + playerX * size.width * 0.10;
+    final centerX = size.width / 2 + playerX * size.width * 0.07;
 
     canvas.drawLine(
-      Offset(centerX - size.width * 0.32, size.height),
+      Offset(centerX - size.width * 0.28, size.height),
       Offset(centerX - size.width * 0.08, horizonY),
       gridPaint,
     );
     canvas.drawLine(
-      Offset(centerX + size.width * 0.32, size.height),
+      Offset(centerX + size.width * 0.28, size.height),
       Offset(centerX + size.width * 0.08, horizonY),
       gridPaint,
     );
@@ -1040,7 +1058,7 @@ class _ForwardRunPainter extends CustomPainter {
     for (int i = 0; i < 8; i++) {
       final t = i / 7;
       final y = lerpDouble(horizonY + 16, size.height - 28, pow(t, 1.45).toDouble())!;
-      final halfW = lerpDouble(size.width * 0.03, size.width * 0.28, t)!;
+      final halfW = lerpDouble(size.width * 0.03, size.width * 0.24, t)!;
       canvas.drawLine(
         Offset(centerX - halfW, y),
         Offset(centerX + halfW, y),
@@ -1225,8 +1243,8 @@ class _ForwardRunPainter extends CustomPainter {
       RRect.fromRectAndRadius(
         Rect.fromCenter(
           center: pos,
-          width: size.width * 0.008 * scale + 3,
-          height: size.height * 0.030 * scale + 6,
+          width: size.width * 0.007 * scale + 3,
+          height: size.height * 0.026 * scale + 5,
         ),
         const Radius.circular(3),
       ),
@@ -1252,8 +1270,8 @@ class _ForwardRunPainter extends CustomPainter {
 
   void _paintReticle(Canvas canvas, Size size) {
     final center = Offset(
-      size.width * (0.5 + playerX * 0.14),
-      size.height * (0.56 + playerY * 0.12),
+      size.width * (0.5 + playerX * 0.13),
+      size.height * (0.56 + playerY * 0.10),
     );
 
     final p = Paint()
@@ -1311,13 +1329,10 @@ class _ForwardRunPainter extends CustomPainter {
 
   Offset _project(Size size, double laneX, double z, double playerX, double playerY) {
     final horizonY = size.height * 0.42;
-    final bottomY = size.height * (0.88 + playerY * 0.03);
-
-    // FIXED:
-    // z now grows toward the player, so scale uses z directly.
+    final bottomY = size.height * (0.86 + playerY * 0.025);
     final scale = _scaleForZ(z);
 
-    final screenX = size.width * (0.5 + (laneX - playerX * 0.55) * 0.33 * scale);
+    final screenX = size.width * (0.5 + (laneX - playerX * 0.52) * 0.28 * scale);
     final screenY = lerpDouble(horizonY, bottomY, scale)!;
 
     return Offset(screenX, screenY);
