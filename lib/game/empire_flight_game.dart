@@ -77,6 +77,9 @@ class _WorldObject {
     required this.hp,
     this.active = true,
   });
+
+  bool get isDestructible =>
+      kind == _ObjectKind.drone || kind == _ObjectKind.battery;
 }
 
 class _Shot {
@@ -140,8 +143,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   double damageFlash = 0;
 
   // HACKABLE NOTE:
-  // targetPlayerX/Y are what the controls want.
-  // playerX/Y ease toward them for better arcade flight feel.
+  // targetPlayerX/Y are where controls want the ship to go.
+  // playerX/Y ease toward them for a slightly weighted arcade feel.
   double playerX = 0;
   double playerY = 0;
   double targetPlayerX = 0;
@@ -160,6 +163,10 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   Size playSize = const Size(1000, 700);
 
+  // HACKABLE NOTE:
+  // These are the main flight lanes. Keeping them explicit makes wave design easier.
+  final List<double> lanes = const [-0.90, -0.60, -0.30, 0.00, 0.30, 0.60, 0.90];
+
   @override
   void initState() {
     super.initState();
@@ -176,7 +183,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
         goalDistance: 5400,
         baseSpeed: 210,
         spawnRate: 0.95,
-        droneChance: 0.28,
+        droneChance: 0.24,
       ),
       _MissionData(
         name: 'Mission 2: Forest Run',
@@ -189,7 +196,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
         goalDistance: 6400,
         baseSpeed: 225,
         spawnRate: 0.86,
-        droneChance: 0.34,
+        droneChance: 0.30,
       ),
       _MissionData(
         name: 'Mission 3: Desert Run',
@@ -202,7 +209,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
         goalDistance: 7600,
         baseSpeed: 240,
         spawnRate: 0.78,
-        droneChance: 0.38,
+        droneChance: 0.34,
       ),
     ];
 
@@ -270,7 +277,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
       phase = _GamePhase.briefing;
       hull = 100;
     } else {
-      hull = min(100, hull + 20);
+      hull = min(100, hull + 18);
       phase = _GamePhase.briefing;
     }
 
@@ -370,10 +377,9 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     // HACKABLE NOTE:
     // Narrower corridor = more attack-run feel.
     targetPlayerX = targetPlayerX.clamp(-0.95, 0.95);
-    targetPlayerY = targetPlayerY.clamp(-0.26, 0.26);
+    targetPlayerY = targetPlayerY.clamp(-0.24, 0.24);
 
-    // Smooth follow so the ship feels like it has a little weight.
-    final follow = min(1.0, dt * 8.5);
+    final follow = min(1.0, dt * 8.2);
     playerX = lerpDouble(playerX, targetPlayerX, follow)!;
     playerY = lerpDouble(playerY, targetPlayerY, follow)!;
 
@@ -385,21 +391,53 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   void _spawnWorld(double dt) {
     spawnTimer += dt;
 
-    final delay = max(0.26, mission.spawnRate / difficultyScale);
+    final delay = max(0.24, mission.spawnRate / difficultyScale);
     if (spawnTimer < delay) return;
     spawnTimer = 0;
 
-    final spawnDrone = rng.nextDouble() < mission.droneChance;
-    final lane = [-0.9, -0.6, -0.3, 0.0, 0.3, 0.6, 0.9][rng.nextInt(7)];
+    final roll = rng.nextDouble();
 
-    if (spawnDrone) {
+    // HACKABLE NOTE:
+    // Wave balance:
+    // 0.00 - 0.22  => drone
+    // 0.22 - 0.62  => single heavy obstacle
+    // 0.62 - 1.00  => two-obstacle gate pattern
+    if (roll < mission.droneChance) {
+      _spawnDrone();
+    } else if (roll < 0.62) {
+      _spawnSingleObstacleOrBattery();
+    } else {
+      _spawnGatePattern();
+    }
+  }
+
+  void _spawnDrone() {
+    final lane = lanes[rng.nextInt(lanes.length)];
+
+    objects.add(
+      _WorldObject(
+        kind: _ObjectKind.drone,
+        laneX: lane,
+        z: 0.06,
+        width: 0.10,
+        height: 0.09,
+        hp: 3,
+      ),
+    );
+  }
+
+  void _spawnSingleObstacleOrBattery() {
+    final lane = lanes[rng.nextInt(lanes.length)];
+    final spawnBattery = rng.nextDouble() < 0.25;
+
+    if (spawnBattery) {
       objects.add(
         _WorldObject(
-          kind: _ObjectKind.drone,
+          kind: _ObjectKind.battery,
           laneX: lane,
-          z: 0.06,
+          z: 0.05,
           width: 0.10,
-          height: 0.09,
+          height: 0.16,
           hp: 2,
         ),
       );
@@ -410,12 +448,12 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
       case 0:
         objects.add(
           _WorldObject(
-            kind: rng.nextBool() ? _ObjectKind.tower : _ObjectKind.battery,
+            kind: _ObjectKind.tower,
             laneX: lane,
             z: 0.05,
-            width: 0.09,
-            height: 0.19,
-            hp: 1,
+            width: 0.10,
+            height: 0.22,
+            hp: 999,
           ),
         );
         break;
@@ -425,24 +463,98 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
             kind: _ObjectKind.tree,
             laneX: lane,
             z: 0.05,
-            width: 0.11,
-            height: 0.25,
-            hp: 1,
+            width: 0.12,
+            height: 0.28,
+            hp: 999,
           ),
         );
         break;
       case 2:
         objects.add(
           _WorldObject(
-            kind: rng.nextBool() ? _ObjectKind.rock : _ObjectKind.battery,
+            kind: _ObjectKind.rock,
             laneX: lane,
             z: 0.05,
-            width: 0.11,
-            height: 0.21,
-            hp: 1,
+            width: 0.12,
+            height: 0.24,
+            hp: 999,
           ),
         );
         break;
+    }
+  }
+
+  void _spawnGatePattern() {
+    // HACKABLE NOTE:
+    // Pick one open lane and block nearby lanes.
+    // This forces movement and stops center camping.
+    final openLane = lanes[rng.nextInt(lanes.length)];
+
+    final blocked = <double>[];
+    for (final lane in lanes) {
+      if ((lane - openLane).abs() >= 0.25) {
+        blocked.add(lane);
+      }
+    }
+
+    blocked.shuffle(rng);
+
+    final count = rng.nextBool() ? 2 : 3;
+    for (int i = 0; i < min(count, blocked.length); i++) {
+      final lane = blocked[i];
+
+      switch (missionIndex) {
+        case 0:
+          objects.add(
+            _WorldObject(
+              kind: _ObjectKind.tower,
+              laneX: lane,
+              z: 0.05,
+              width: 0.10,
+              height: 0.22,
+              hp: 999,
+            ),
+          );
+          break;
+        case 1:
+          objects.add(
+            _WorldObject(
+              kind: _ObjectKind.tree,
+              laneX: lane,
+              z: 0.05,
+              width: 0.12,
+              height: 0.28,
+              hp: 999,
+            ),
+          );
+          break;
+        case 2:
+          objects.add(
+            _WorldObject(
+              kind: _ObjectKind.rock,
+              laneX: lane,
+              z: 0.05,
+              width: 0.12,
+              height: 0.24,
+              hp: 999,
+            ),
+          );
+          break;
+      }
+    }
+
+    // Occasionally place a shootable object in the open-ish area.
+    if (rng.nextDouble() < 0.45) {
+      objects.add(
+        _WorldObject(
+          kind: rng.nextBool() ? _ObjectKind.battery : _ObjectKind.drone,
+          laneX: openLane,
+          z: 0.09,
+          width: 0.10,
+          height: 0.11,
+          hp: rng.nextBool() ? 2 : 3,
+        ),
+      );
     }
   }
 
@@ -450,13 +562,13 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     final advance = dt * (0.30 + worldSpeed / 850.0);
 
     for (final o in objects) {
-      o.z += advance * (o.kind == _ObjectKind.drone ? 1.10 : 1.0);
+      o.z += advance * (o.kind == _ObjectKind.drone ? 1.08 : 1.0);
     }
   }
 
   void _updateShots(double dt) {
     for (final s in shots) {
-      s.z -= dt * 1.9;
+      s.z -= dt * 1.8;
       if (s.z < 0.0) {
         s.active = false;
       }
@@ -468,13 +580,12 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
       if (!o.active) continue;
 
       // HACKABLE NOTE:
-      // This is the player collision width.
-      // Lower value = tighter / fairer dodging.
+      // Larger than before so dodging matters again.
       if (o.z > 0.90) {
-        final xHit = (o.laneX - playerX).abs() < (o.width * 0.92);
+        final xHit = (o.laneX - playerX).abs() < (o.width * 1.02);
         if (xHit) {
           o.active = false;
-          hull -= (o.kind == _ObjectKind.drone) ? 15 : 22;
+          hull -= (o.kind == _ObjectKind.drone || o.kind == _ObjectKind.battery) ? 15 : 24;
           damageFlash = 0.15;
           explosions.add(
             _Explosion(
@@ -487,22 +598,19 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
       for (final s in shots) {
         if (!s.active || !o.active) continue;
+        if (!o.isDestructible) continue;
 
-        final zHit = (s.z - o.z).abs() < 0.06;
-
-        // HACKABLE NOTE:
-        // This is the shot hit width.
-        // Lower value = more precise aiming.
-        final xHit = (s.laneX - o.laneX).abs() < (o.width * 0.78);
-
-        final yBias = (s.aimY.abs() < 0.24) || o.kind != _ObjectKind.drone;
+        final zHit = (s.z - o.z).abs() < 0.05;
+        final xHit = (s.laneX - o.laneX).abs() < (o.width * 0.60);
+        final yBias = (s.aimY.abs() < 0.22) || o.kind != _ObjectKind.drone;
 
         if (zHit && xHit && yBias) {
           s.active = false;
           o.hp -= 1;
+
           if (o.hp <= 0) {
             o.active = false;
-            score += (o.kind == _ObjectKind.drone) ? 160 : 55;
+            score += (o.kind == _ObjectKind.drone) ? 170 : 70;
             explosions.add(
               _Explosion(
                 laneX: o.laneX,
@@ -515,7 +623,6 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
       if (o.active && o.z > 1.08) {
         o.active = false;
-        score += 4;
       }
     }
   }
@@ -527,10 +634,10 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   void _fire() {
     // HACKABLE NOTE:
-    // Lower cooldown = faster fire rate.
+    // Slower fire rate and fewer shots makes balance better.
     if (phase != _GamePhase.playing) return;
     if (fireCooldown > 0) return;
-    if (shots.length > 12) return;
+    if (shots.length > 6) return;
 
     shots.add(
       _Shot(
@@ -540,23 +647,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
       ),
     );
 
-    shots.add(
-      _Shot(
-        laneX: (reticleX - 0.025).clamp(-1.0, 1.0),
-        aimY: reticleY,
-        z: 0.90,
-      ),
-    );
-
-    shots.add(
-      _Shot(
-        laneX: (reticleX + 0.025).clamp(-1.0, 1.0),
-        aimY: reticleY,
-        z: 0.90,
-      ),
-    );
-
-    fireCooldown = 0.09;
+    fireCooldown = 0.16;
   }
 
   void _startMission() {
@@ -654,7 +745,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
     setState(() {
       targetPlayerX = (targetPlayerX + dx * 2.6).clamp(-0.95, 0.95);
-      targetPlayerY = (targetPlayerY + dy * 2.0).clamp(-0.26, 0.26);
+      targetPlayerY = (targetPlayerY + dy * 2.0).clamp(-0.24, 0.24);
     });
   }
 
@@ -1243,8 +1334,8 @@ class _ForwardRunPainter extends CustomPainter {
       RRect.fromRectAndRadius(
         Rect.fromCenter(
           center: pos,
-          width: size.width * 0.007 * scale + 3,
-          height: size.height * 0.026 * scale + 5,
+          width: size.width * 0.006 * scale + 3,
+          height: size.height * 0.022 * scale + 5,
         ),
         const Radius.circular(3),
       ),
