@@ -11,12 +11,15 @@ void main() {
     debugPrintStack(stackTrace: details.stack);
   };
 
-  runZonedGuarded(() {
-    runApp(const EmpireFlightApp());
-  }, (error, stack) {
-    debugPrint('ZONE ERROR: $error');
-    debugPrintStack(stackTrace: stack);
-  });
+  runZonedGuarded(
+    () {
+      runApp(const EmpireFlightApp());
+    },
+    (error, stack) {
+      debugPrint('ZONE ERROR: $error');
+      debugPrintStack(stackTrace: stack);
+    },
+  );
 }
 
 class EmpireFlightApp extends StatelessWidget {
@@ -83,7 +86,10 @@ class _GameBootScreenState extends State<GameBootScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF182235),
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: const Color(0x4488AAFF), width: 1.5),
+                  border: Border.all(
+                    color: const Color(0x4488AAFF),
+                    width: 1.5,
+                  ),
                   boxShadow: const [
                     BoxShadow(
                       blurRadius: 20,
@@ -109,10 +115,7 @@ class _GameBootScreenState extends State<GameBootScreen> {
                       'Boot screen loaded successfully.\n'
                       'That means Flutter and GitHub Pages are working.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.white70,
-                      ),
+                      style: TextStyle(fontSize: 16, color: Colors.white70),
                     ),
                     const SizedBox(height: 20),
                     ElevatedButton(
@@ -124,20 +127,18 @@ class _GameBootScreenState extends State<GameBootScreen> {
                         });
                       },
                       child: const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 14,
+                        ),
                         child: Text('Launch Game'),
                       ),
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      'HACKABLE NOTE:\n'
-                      'If tapping Launch Game goes black or returns an error,\n'
-                      'the issue is inside empire_flight_game.dart or one of its imports.',
+                      'App Version 2.5',
                       textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.white54,
-                      ),
+                      style: TextStyle(fontSize: 13, color: Colors.white54),
                     ),
                     if (_caughtError != null) ...[
                       const SizedBox(height: 24),
@@ -177,10 +178,7 @@ class _GameErrorBoundary extends StatefulWidget {
   final Widget child;
   final void Function(Object error, StackTrace stack) onError;
 
-  const _GameErrorBoundary({
-    required this.child,
-    required this.onError,
-  });
+  const _GameErrorBoundary({required this.child, required this.onError});
 
   @override
   State<_GameErrorBoundary> createState() => _GameErrorBoundaryState();
