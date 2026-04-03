@@ -38,22 +38,14 @@ class _Hazard {
   });
 
   _HazardKind kind;
-
-  /// World horizontal offset. Negative = left, positive = right.
   double x;
-
-  /// Depth: 0 = far/horizon, 1 = near cockpit.
   double z;
-
-  /// Relative world size.
   double width;
   double height;
-
   int hp;
   bool active;
 
   bool get isShootable => kind == _HazardKind.turret || kind == _HazardKind.drone;
-
   bool get isSolid => kind == _HazardKind.iceSpire || kind == _HazardKind.iceWall;
 }
 
@@ -108,7 +100,6 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   _GamePhase phase = _GamePhase.briefing;
 
-  // Mission stats
   int score = 0;
   int hull = 100;
   double distance = 0;
@@ -116,13 +107,11 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   static const double _missionDistance = 5200;
   static const double _baseSpeed = 220;
 
-  // Ship state: screen-space cinematic model, not lane model.
   double shipX = 0.0;
   double shipY = 0.0;
   double shipVX = 0.0;
   double shipVY = 0.0;
 
-  // Input state
   bool leftPressed = false;
   bool rightPressed = false;
   bool upPressed = false;
@@ -137,7 +126,6 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   final List<_Explosion> explosions = [];
   final List<_Star> stars = [];
 
-  // Track which scripted groups have already spawned.
   final Set<int> _spawnedGroups = <int>{};
 
   Size playSize = const Size(1000, 700);
@@ -175,18 +163,25 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   double get progress => (distance / _missionDistance).clamp(0.0, 1.0);
 
-  double get worldSpeed {
-    // HACKABLE NOTE:
-    // Keep this flatter than before. The run should build pressure,
-    // but not turn into chaos.
-    return _baseSpeed * (1.0 + progress * 0.18);
-  }
+  double get worldSpeed => _baseSpeed * (1.0 + progress * 0.18);
 
   Offset _shipScreenCenter(Size size) {
     return Offset(
       size.width * (0.5 + shipX * 0.22),
       size.height * (0.78 + shipY * 0.10),
     );
+  }
+
+  Offset _projectToScreen(double x, double z) {
+    final horizonY = playSize.height * 0.42;
+    final bottomY = playSize.height * (0.86 + shipY * 0.025);
+    final scale = z.clamp(0.06, 1.0);
+
+    final screenX =
+        playSize.width * (0.5 + (x - shipX * 0.50) * 0.30 * scale);
+    final screenY = lerpDouble(horizonY, bottomY, scale)!;
+
+    return Offset(screenX, screenY);
   }
 
   void _resetRun() {
@@ -249,7 +244,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     _updateShip(dt);
     _spawnScriptedGroups();
     _updateHazards(dt);
-    _handleShooting(dt);
+    _handleShooting();
     _handleCollisions();
     _cleanup();
 
@@ -304,10 +299,6 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   }
 
   void _updateShip(double dt) {
-    // HACKABLE NOTE:
-    // This is the feel core.
-    // Bigger acceleration = snappier.
-    // Bigger damping = more stable.
     const accelX = 3.0;
     const accelY = 2.1;
     const damping = 0.86;
@@ -328,82 +319,31 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     shipX += shipVX * dt;
     shipY += shipVY * dt;
 
-    // HACKABLE NOTE:
-    // Broad playable sweep. This should feel wider than the old lane game.
     shipX = shipX.clamp(-0.95, 0.95);
     shipY = shipY.clamp(-0.22, 0.22);
 
-    // Soft edge bounce/settle.
     if (shipX <= -0.95 || shipX >= 0.95) shipVX *= -0.15;
     if (shipY <= -0.22 || shipY >= 0.22) shipVY *= -0.15;
   }
 
   void _spawnScriptedGroups() {
-    // HACKABLE NOTE:
-    // This is the new foundation: hand-authored distance groups,
-    // not random soup.
-    _spawnAt(
-      180,
-      1,
-      () => _spawnTurretPair(centerGapLeft: true),
-    );
-    _spawnAt(
-      520,
-      2,
-      () => _spawnSpireSlalom(leftFirst: true),
-    );
-    _spawnAt(
-      880,
-      3,
-      () => _spawnWideGateWithTurret(openLeft: false),
-    );
-    _spawnAt(
-      1250,
-      4,
-      () => _spawnDroneSweep(leftToRight: true),
-    );
-    _spawnAt(
-      1650,
-      5,
-      () => _spawnSpireSlalom(leftFirst: false),
-    );
-    _spawnAt(
-      2050,
-      6,
-      () => _spawnWideGateWithTurret(openLeft: true),
-    );
-    _spawnAt(
-      2450,
-      7,
-      () => _spawnNarrowIcePass(openCenter: true),
-    );
-    _spawnAt(
-      2850,
-      8,
-      () => _spawnDroneSweep(leftToRight: false),
-    );
-    _spawnAt(
-      3300,
-      9,
-      () => _spawnTurretRun(),
-    );
-    _spawnAt(
-      3820,
-      10,
-      () => _spawnNarrowIcePass(openCenter: false),
-    );
-    _spawnAt(
-      4300,
-      11,
-      () => _spawnFinalPush(),
-    );
+    _spawnAt(180, 1, () => _spawnTurretPair(centerGapLeft: true));
+    _spawnAt(520, 2, () => _spawnSpireSlalom(leftFirst: true));
+    _spawnAt(880, 3, () => _spawnWideGateWithTurret(openLeft: false));
+    _spawnAt(1250, 4, () => _spawnDroneSweep(leftToRight: true));
+    _spawnAt(1650, 5, () => _spawnSpireSlalom(leftFirst: false));
+    _spawnAt(2050, 6, () => _spawnWideGateWithTurret(openLeft: true));
+    _spawnAt(2450, 7, () => _spawnNarrowIcePass(openCenter: true));
+    _spawnAt(2850, 8, () => _spawnDroneSweep(leftToRight: false));
+    _spawnAt(3300, 9, () => _spawnTurretRun());
+    _spawnAt(3820, 10, () => _spawnNarrowIcePass(openCenter: false));
+    _spawnAt(4300, 11, () => _spawnFinalPush());
   }
 
   void _spawnAt(double distanceMark, int id, VoidCallback spawn) {
     if (_spawnedGroups.contains(id)) return;
     if (distance >= distanceMark) return;
 
-    // Spawn when the run is approaching this section.
     if (distanceMark - distance <= 420) {
       _spawnedGroups.add(id);
       spawn();
@@ -432,9 +372,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   }
 
   void _spawnSpireSlalom({required bool leftFirst}) {
-    final xs = leftFirst
-        ? [-0.62, 0.20, -0.18]
-        : [0.62, -0.20, 0.18];
+    final xs = leftFirst ? [-0.62, 0.20, -0.18] : [0.62, -0.20, 0.18];
 
     for (int i = 0; i < xs.length; i++) {
       hazards.add(
@@ -509,9 +447,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   }
 
   void _spawnDroneSweep({required bool leftToRight}) {
-    final xs = leftToRight
-        ? [-0.62, -0.24, 0.16]
-        : [0.62, 0.24, -0.16];
+    final xs = leftToRight ? [-0.62, -0.24, 0.16] : [0.62, 0.24, -0.16];
 
     for (int i = 0; i < xs.length; i++) {
       hazards.add(
@@ -651,7 +587,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     }
   }
 
-  void _handleShooting(double dt) {
+  void _handleShooting() {
     if (!firePressed) return;
     if (fireCooldown > 0) return;
     if (phase != _GamePhase.playing) return;
@@ -662,7 +598,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
     final start = _shipScreenCenter(playSize);
     final end = target != null
-        ? _project(playSize, target.x, target.z, shipX, shipY)
+        ? _projectToScreen(target.x, target.z)
         : Offset(
             playSize.width * (0.5 + shipX * 0.14),
             playSize.height * 0.50,
@@ -693,9 +629,6 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     for (final h in hazards) {
       if (!h.active || !h.isShootable) continue;
 
-      // HACKABLE NOTE:
-      // This is the new soft target model.
-      // It favors targets somewhat near the ship and in a good forward depth band.
       final xDist = (h.x - shipX).abs();
 
       if (xDist > 0.42) continue;
@@ -718,11 +651,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
       if (!h.active) continue;
 
       if (h.z > 0.88) {
-        // HACKABLE NOTE:
-        // Bigger, friendlier cinematic ship contact space.
-        final xThreshold = h.kind == _HazardKind.iceWall
-            ? h.width * 1.18
-            : h.width * 1.08;
+        final xThreshold =
+            h.kind == _HazardKind.iceWall ? h.width * 1.18 : h.width * 1.08;
 
         if ((h.x - shipX).abs() < xThreshold) {
           h.active = false;
@@ -772,7 +702,6 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     final dx = details.delta.dx / max(1, playSize.width);
     final dy = details.delta.dy / max(1, playSize.height);
 
-    // Direct momentum push for touch.
     shipVX += dx * 2.5;
     shipVY += dy * 1.5;
   }
@@ -912,7 +841,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                   _startMission();
                 } else if (phase == _GamePhase.paused) {
                   _togglePause();
-                } else if (phase == _GamePhase.victory || phase == _GamePhase.gameOver) {
+                } else if (phase == _GamePhase.victory ||
+                    phase == _GamePhase.gameOver) {
                   _restartRun();
                 }
               },
@@ -948,11 +878,16 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                         children: [
                           Expanded(
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
                               decoration: BoxDecoration(
                                 color: const Color(0x55000000),
                                 borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: const Color(0x22FFFFFF)),
+                                border: Border.all(
+                                  color: const Color(0x22FFFFFF),
+                                ),
                               ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
@@ -978,12 +913,15 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(999),
+                                          borderRadius:
+                                              BorderRadius.circular(999),
                                           child: LinearProgressIndicator(
                                             value: hull / 100,
                                             minHeight: 10,
-                                            backgroundColor: const Color(0x33222222),
-                                            valueColor: AlwaysStoppedAnimation<Color>(
+                                            backgroundColor:
+                                                const Color(0x33222222),
+                                            valueColor:
+                                                AlwaysStoppedAnimation<Color>(
                                               hull > 50
                                                   ? const Color(0xFF7FDBFF)
                                                   : hull > 25
@@ -997,21 +935,26 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                                       SizedBox(
                                         width: isCompact ? 90 : 150,
                                         child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(999),
+                                          borderRadius:
+                                              BorderRadius.circular(999),
                                           child: LinearProgressIndicator(
                                             value: (_missionDistance == 0)
                                                 ? 0
-                                                : (distance / _missionDistance).clamp(0.0, 1.0),
+                                                : (distance / _missionDistance)
+                                                    .clamp(0.0, 1.0),
                                             minHeight: 10,
-                                            backgroundColor: const Color(0x33222222),
-                                            valueColor: const AlwaysStoppedAnimation<Color>(
-                                              Colors.white,
-                                            ),
+                                            backgroundColor:
+                                                const Color(0x33222222),
+                                            valueColor:
+                                                const AlwaysStoppedAnimation<
+                                                    Color>(Colors.white),
                                           ),
                                         ),
                                       ),
                                       const SizedBox(width: 8),
-                                      Text('${distance.floor()}/${_missionDistance.toInt()}m'),
+                                      Text(
+                                        '${distance.floor()}/${_missionDistance.toInt()}m',
+                                      ),
                                     ],
                                   ),
                                 ],
@@ -1019,17 +962,22 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                             ),
                           ),
                           const SizedBox(width: 10),
-                          if (phase == _GamePhase.playing || phase == _GamePhase.paused)
+                          if (phase == _GamePhase.playing ||
+                              phase == _GamePhase.paused)
                             Container(
                               decoration: BoxDecoration(
                                 color: const Color(0x55000000),
                                 borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: const Color(0x22FFFFFF)),
+                                border: Border.all(
+                                  color: const Color(0x22FFFFFF),
+                                ),
                               ),
                               child: IconButton(
                                 onPressed: _togglePause,
                                 icon: Icon(
-                                  phase == _GamePhase.paused ? Icons.play_arrow : Icons.pause,
+                                  phase == _GamePhase.paused
+                                      ? Icons.play_arrow
+                                      : Icons.pause,
                                   color: Colors.white,
                                 ),
                               ),
@@ -1129,9 +1077,12 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                       bottom: 20,
                       child: SafeArea(
                         child: Listener(
-                          onPointerDown: (_) => setState(() => firePressed = true),
-                          onPointerUp: (_) => setState(() => firePressed = false),
-                          onPointerCancel: (_) => setState(() => firePressed = false),
+                          onPointerDown: (_) =>
+                              setState(() => firePressed = true),
+                          onPointerUp: (_) =>
+                              setState(() => firePressed = false),
+                          onPointerCancel: (_) =>
+                              setState(() => firePressed = false),
                           child: Container(
                             width: 96,
                             height: 96,
@@ -1544,7 +1495,6 @@ class _MissionOnePainter extends CustomPainter {
       sidePaint,
     );
 
-    // Canopy side struts for stronger cockpit feel.
     canvas.drawLine(
       Offset(size.width * 0.18, size.height),
       Offset(size.width * 0.08, size.height * 0.58),
