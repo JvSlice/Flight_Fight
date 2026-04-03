@@ -11,54 +11,63 @@ class EmpireFlightGame extends StatefulWidget {
   State<EmpireFlightGame> createState() => _EmpireFlightGameState();
 }
 
-enum _GamePhase { briefing, playing, paused, victory, gameOver }
+enum _GamePhase {
+  briefing,
+  playing,
+  paused,
+  victory,
+  gameOver,
+}
 
-enum _ObjectKind { iceWall, iceSpire, turret, drone }
+enum _HazardKind {
+  iceSpire,
+  iceWall,
+  turret,
+  drone,
+}
 
-class _WorldObject {
-  _WorldObject({
+class _Hazard {
+  _Hazard({
     required this.kind,
     required this.x,
     required this.z,
     required this.width,
     required this.height,
-    required this.hp,
+    this.hp = 1,
     this.active = true,
   });
 
-  _ObjectKind kind;
+  _HazardKind kind;
 
-  /// Horizontal world offset. Negative = left, positive = right.
+  /// World horizontal offset. Negative = left, positive = right.
   double x;
 
-  /// Depth: 0 = horizon / far, 1 = near cockpit.
+  /// Depth: 0 = far/horizon, 1 = near cockpit.
   double z;
 
-  /// Relative projected size controls.
+  /// Relative world size.
   double width;
   double height;
 
   int hp;
   bool active;
 
-  bool get isShootable =>
-      kind == _ObjectKind.turret || kind == _ObjectKind.drone;
+  bool get isShootable => kind == _HazardKind.turret || kind == _HazardKind.drone;
 
-  bool get isSolid =>
-      kind == _ObjectKind.iceWall || kind == _ObjectKind.iceSpire;
+  bool get isSolid => kind == _HazardKind.iceSpire || kind == _HazardKind.iceWall;
 }
 
-class _Shot {
-  _Shot({
-    required this.x,
-    required this.z,
-    required this.yBias,
+class _LaserBolt {
+  _LaserBolt({
+    required this.start,
+    required this.end,
+    this.t = 0,
     this.active = true,
   });
 
-  double x;
-  double z;
-  double yBias;
+  Offset start;
+  Offset end;
+  double t;
   bool active;
 }
 
@@ -66,20 +75,24 @@ class _Explosion {
   _Explosion({
     required this.x,
     required this.z,
+    this.large = false,
     this.t = 0,
     this.active = true,
-    this.large = false,
   });
 
   double x;
   double z;
+  bool large;
   double t;
   bool active;
-  bool large;
 }
 
 class _Star {
-  _Star({required this.x, required this.y, required this.speed});
+  _Star({
+    required this.x,
+    required this.y,
+    required this.speed,
+  });
 
   double x;
   double y;
@@ -95,19 +108,21 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   _GamePhase phase = _GamePhase.briefing;
 
+  // Mission stats
   int score = 0;
   int hull = 100;
   double distance = 0;
 
   static const double _missionDistance = 5200;
-  static const double _baseSpeed = 210;
-  static const double _maxDifficultyBonus = 0.28;
+  static const double _baseSpeed = 220;
 
-  double playerX = 0.0;
-  double targetPlayerX = 0.0;
-  double playerY = 0.0;
-  double targetPlayerY = 0.0;
+  // Ship state: screen-space cinematic model, not lane model.
+  double shipX = 0.0;
+  double shipY = 0.0;
+  double shipVX = 0.0;
+  double shipVY = 0.0;
 
+  // Input state
   bool leftPressed = false;
   bool rightPressed = false;
   bool upPressed = false;
@@ -115,13 +130,15 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   bool firePressed = false;
 
   double fireCooldown = 0.0;
-  double spawnTimer = 0.0;
   double damageFlash = 0.0;
 
-  final List<_WorldObject> objects = [];
-  final List<_Shot> shots = [];
+  final List<_Hazard> hazards = [];
+  final List<_LaserBolt> bolts = [];
   final List<_Explosion> explosions = [];
   final List<_Star> stars = [];
+
+  // Track which scripted groups have already spawned.
+  final Set<int> _spawnedGroups = <int>{};
 
   Size playSize = const Size(1000, 700);
 
@@ -129,12 +146,12 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   void initState() {
     super.initState();
 
-    for (int i = 0; i < 70; i++) {
+    for (int i = 0; i < 80; i++) {
       stars.add(
         _Star(
           x: _rng.nextDouble(),
           y: _rng.nextDouble() * 0.56,
-          speed: 0.25 + _rng.nextDouble() * 0.85,
+          speed: 0.25 + _rng.nextDouble() * 0.9,
         ),
       );
     }
@@ -156,26 +173,32 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     super.dispose();
   }
 
-  double get difficultyScale {
-    final pct = (distance / _missionDistance).clamp(0.0, 1.0);
-    return 1.0 + pct * _maxDifficultyBonus;
+  double get progress => (distance / _missionDistance).clamp(0.0, 1.0);
+
+  double get worldSpeed {
+    // HACKABLE NOTE:
+    // Keep this flatter than before. The run should build pressure,
+    // but not turn into chaos.
+    return _baseSpeed * (1.0 + progress * 0.18);
   }
 
-  double get worldSpeed => _baseSpeed * difficultyScale;
+  Offset _shipScreenCenter(Size size) {
+    return Offset(
+      size.width * (0.5 + shipX * 0.22),
+      size.height * (0.78 + shipY * 0.10),
+    );
+  }
 
   void _resetRun() {
     phase = _GamePhase.briefing;
     score = 0;
     hull = 100;
     distance = 0;
-    fireCooldown = 0;
-    spawnTimer = 0;
-    damageFlash = 0;
 
-    playerX = 0;
-    targetPlayerX = 0;
-    playerY = 0;
-    targetPlayerY = 0;
+    shipX = 0.0;
+    shipY = 0.0;
+    shipVX = 0.0;
+    shipVY = 0.0;
 
     leftPressed = false;
     rightPressed = false;
@@ -183,9 +206,13 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     downPressed = false;
     firePressed = false;
 
-    objects.clear();
-    shots.clear();
+    fireCooldown = 0.0;
+    damageFlash = 0.0;
+
+    hazards.clear();
+    bolts.clear();
     explosions.clear();
+    _spawnedGroups.clear();
   }
 
   void _startLoop() {
@@ -200,10 +227,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
         return;
       }
 
-      final dt = (now.difference(_lastTick!).inMicroseconds / 1000000.0).clamp(
-        0.0,
-        0.033,
-      );
+      final dt = (now.difference(_lastTick!).inMicroseconds / 1000000.0)
+          .clamp(0.0, 0.033);
       _lastTick = now;
 
       _update(dt);
@@ -214,25 +239,17 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     if (!mounted) return;
 
     _updateStars(dt);
-    _updateExplosions(dt);
-
-    if (damageFlash > 0) {
-      damageFlash -= dt;
-    }
-
-    if (fireCooldown > 0) {
-      fireCooldown -= dt;
-    }
+    _updateEffects(dt);
 
     if (phase != _GamePhase.playing) {
       setState(() {});
       return;
     }
 
-    _handleInput(dt);
-    _spawnPatterns(dt);
-    _updateObjects(dt);
-    _updateShots(dt);
+    _updateShip(dt);
+    _spawnScriptedGroups();
+    _updateHazards(dt);
+    _handleShooting(dt);
     _handleCollisions();
     _cleanup();
 
@@ -242,15 +259,15 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
       hull = 0;
       phase = _GamePhase.gameOver;
     } else if (distance >= _missionDistance) {
-      phase = _GamePhase.victory;
       score += 1500;
+      phase = _GamePhase.victory;
     }
 
     setState(() {});
   }
 
   void _updateStars(double dt) {
-    final drift = 0.06 + difficultyScale * 0.015;
+    final drift = 0.05 + progress * 0.02;
     for (final s in stars) {
       s.y += s.speed * drift * dt * 10;
       if (s.y > 0.58) {
@@ -260,7 +277,23 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     }
   }
 
-  void _updateExplosions(double dt) {
+  void _updateEffects(double dt) {
+    if (damageFlash > 0) {
+      damageFlash -= dt;
+    }
+
+    if (fireCooldown > 0) {
+      fireCooldown -= dt;
+    }
+
+    for (final b in bolts) {
+      b.t += dt * 6.0;
+      if (b.t >= 1.0) {
+        b.active = false;
+      }
+    }
+    bolts.removeWhere((b) => !b.active);
+
     for (final e in explosions) {
       e.t += dt * 1.9;
       if (e.t >= 1.0) {
@@ -270,66 +303,222 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     explosions.removeWhere((e) => !e.active);
   }
 
-  void _handleInput(double dt) {
-    const lateralSpeed = 1.75;
-    const verticalSpeed = 0.95;
-    const followSpeed = 8.8;
+  void _updateShip(double dt) {
+    // HACKABLE NOTE:
+    // This is the feel core.
+    // Bigger acceleration = snappier.
+    // Bigger damping = more stable.
+    const accelX = 3.0;
+    const accelY = 2.1;
+    const damping = 0.86;
+    const maxVX = 1.15;
+    const maxVY = 0.85;
 
-    if (leftPressed) targetPlayerX -= lateralSpeed * dt;
-    if (rightPressed) targetPlayerX += lateralSpeed * dt;
-    if (upPressed) targetPlayerY -= verticalSpeed * dt;
-    if (downPressed) targetPlayerY += verticalSpeed * dt;
+    if (leftPressed) shipVX -= accelX * dt;
+    if (rightPressed) shipVX += accelX * dt;
+    if (upPressed) shipVY -= accelY * dt;
+    if (downPressed) shipVY += accelY * dt;
 
-    targetPlayerX = targetPlayerX.clamp(-0.92, 0.92);
-    targetPlayerY = targetPlayerY.clamp(-0.22, 0.22);
+    shipVX *= pow(damping, dt * 60).toDouble();
+    shipVY *= pow(damping, dt * 60).toDouble();
 
-    final follow = min(1.0, dt * followSpeed);
-    playerX = lerpDouble(playerX, targetPlayerX, follow)!;
-    playerY = lerpDouble(playerY, targetPlayerY, follow)!;
+    shipVX = shipVX.clamp(-maxVX, maxVX);
+    shipVY = shipVY.clamp(-maxVY, maxVY);
 
-    if (firePressed) {
-      _fire();
+    shipX += shipVX * dt;
+    shipY += shipVY * dt;
+
+    // HACKABLE NOTE:
+    // Broad playable sweep. This should feel wider than the old lane game.
+    shipX = shipX.clamp(-0.95, 0.95);
+    shipY = shipY.clamp(-0.22, 0.22);
+
+    // Soft edge bounce/settle.
+    if (shipX <= -0.95 || shipX >= 0.95) shipVX *= -0.15;
+    if (shipY <= -0.22 || shipY >= 0.22) shipVY *= -0.15;
+  }
+
+  void _spawnScriptedGroups() {
+    // HACKABLE NOTE:
+    // This is the new foundation: hand-authored distance groups,
+    // not random soup.
+    _spawnAt(
+      180,
+      1,
+      () => _spawnTurretPair(centerGapLeft: true),
+    );
+    _spawnAt(
+      520,
+      2,
+      () => _spawnSpireSlalom(leftFirst: true),
+    );
+    _spawnAt(
+      880,
+      3,
+      () => _spawnWideGateWithTurret(openLeft: false),
+    );
+    _spawnAt(
+      1250,
+      4,
+      () => _spawnDroneSweep(leftToRight: true),
+    );
+    _spawnAt(
+      1650,
+      5,
+      () => _spawnSpireSlalom(leftFirst: false),
+    );
+    _spawnAt(
+      2050,
+      6,
+      () => _spawnWideGateWithTurret(openLeft: true),
+    );
+    _spawnAt(
+      2450,
+      7,
+      () => _spawnNarrowIcePass(openCenter: true),
+    );
+    _spawnAt(
+      2850,
+      8,
+      () => _spawnDroneSweep(leftToRight: false),
+    );
+    _spawnAt(
+      3300,
+      9,
+      () => _spawnTurretRun(),
+    );
+    _spawnAt(
+      3820,
+      10,
+      () => _spawnNarrowIcePass(openCenter: false),
+    );
+    _spawnAt(
+      4300,
+      11,
+      () => _spawnFinalPush(),
+    );
+  }
+
+  void _spawnAt(double distanceMark, int id, VoidCallback spawn) {
+    if (_spawnedGroups.contains(id)) return;
+    if (distance >= distanceMark) return;
+
+    // Spawn when the run is approaching this section.
+    if (distanceMark - distance <= 420) {
+      _spawnedGroups.add(id);
+      spawn();
     }
   }
 
-  void _spawnPatterns(double dt) {
-    spawnTimer += dt;
-
-    final delay = max(0.34, 1.05 / difficultyScale);
-    if (spawnTimer < delay) return;
-    spawnTimer = 0;
-
-    final roll = _rng.nextDouble();
-
-    if (roll < 0.20) {
-      _spawnDroneBurst();
-      return;
-    }
-
-    if (roll < 0.45) {
-      _spawnSingleIceObstacle();
-      return;
-    }
-
-    if (roll < 0.82) {
-      _spawnGatePattern();
-      return;
-    }
-
-    _spawnGateWithTarget();
+  void _spawnTurretPair({required bool centerGapLeft}) {
+    hazards.addAll([
+      _Hazard(
+        kind: _HazardKind.turret,
+        x: centerGapLeft ? 0.36 : -0.36,
+        z: 0.12,
+        width: 0.10,
+        height: 0.18,
+        hp: 2,
+      ),
+      _Hazard(
+        kind: _HazardKind.turret,
+        x: centerGapLeft ? 0.70 : -0.70,
+        z: 0.08,
+        width: 0.10,
+        height: 0.18,
+        hp: 2,
+      ),
+    ]);
   }
 
-  void _spawnDroneBurst() {
-    final center = (_rng.nextDouble() * 1.4) - 0.7;
-    const offsets = [-0.18, 0.0, 0.18];
+  void _spawnSpireSlalom({required bool leftFirst}) {
+    final xs = leftFirst
+        ? [-0.62, 0.20, -0.18]
+        : [0.62, -0.20, 0.18];
 
-    for (final offset in offsets) {
-      final x = (center + offset).clamp(-0.88, 0.88);
-      objects.add(
-        _WorldObject(
-          kind: _ObjectKind.drone,
-          x: x,
-          z: 0.10 + _rng.nextDouble() * 0.03,
+    for (int i = 0; i < xs.length; i++) {
+      hazards.add(
+        _Hazard(
+          kind: _HazardKind.iceSpire,
+          x: xs[i],
+          z: 0.05 + i * 0.03,
+          width: 0.11,
+          height: 0.25,
+          hp: 999,
+        ),
+      );
+    }
+  }
+
+  void _spawnWideGateWithTurret({required bool openLeft}) {
+    if (openLeft) {
+      hazards.addAll([
+        _Hazard(
+          kind: _HazardKind.iceWall,
+          x: 0.28,
+          z: 0.05,
+          width: 0.22,
+          height: 0.18,
+          hp: 999,
+        ),
+        _Hazard(
+          kind: _HazardKind.iceSpire,
+          x: 0.68,
+          z: 0.05,
+          width: 0.12,
+          height: 0.24,
+          hp: 999,
+        ),
+        _Hazard(
+          kind: _HazardKind.turret,
+          x: -0.20,
+          z: 0.12,
+          width: 0.10,
+          height: 0.18,
+          hp: 2,
+        ),
+      ]);
+    } else {
+      hazards.addAll([
+        _Hazard(
+          kind: _HazardKind.iceWall,
+          x: -0.28,
+          z: 0.05,
+          width: 0.22,
+          height: 0.18,
+          hp: 999,
+        ),
+        _Hazard(
+          kind: _HazardKind.iceSpire,
+          x: -0.68,
+          z: 0.05,
+          width: 0.12,
+          height: 0.24,
+          hp: 999,
+        ),
+        _Hazard(
+          kind: _HazardKind.turret,
+          x: 0.20,
+          z: 0.12,
+          width: 0.10,
+          height: 0.18,
+          hp: 2,
+        ),
+      ]);
+    }
+  }
+
+  void _spawnDroneSweep({required bool leftToRight}) {
+    final xs = leftToRight
+        ? [-0.62, -0.24, 0.16]
+        : [0.62, 0.24, -0.16];
+
+    for (int i = 0; i < xs.length; i++) {
+      hazards.add(
+        _Hazard(
+          kind: _HazardKind.drone,
+          x: xs[i],
+          z: 0.10 + i * 0.025,
           width: 0.10,
           height: 0.09,
           hp: 2,
@@ -338,65 +527,40 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     }
   }
 
-  void _spawnSingleIceObstacle() {
-    final avoidPlayer = playerX;
-    double x = ((_rng.nextDouble() * 2.0) - 1.0) * 0.82;
-
-    if ((x - avoidPlayer).abs() < 0.22) {
-      x += x < 0 ? -0.22 : 0.22;
-    }
-    x = x.clamp(-0.88, 0.88);
-
-    final kind = _rng.nextBool() ? _ObjectKind.iceSpire : _ObjectKind.iceWall;
-
-    objects.add(
-      _WorldObject(
-        kind: kind,
-        x: x,
-        z: 0.05,
-        width: kind == _ObjectKind.iceWall ? 0.16 : 0.11,
-        height: kind == _ObjectKind.iceWall ? 0.18 : 0.25,
-        hp: 999,
-      ),
-    );
-  }
-
-  void _spawnGatePattern() {
-    final openLeft = _rng.nextBool();
-
-    if (openLeft) {
-      objects.addAll([
-        _WorldObject(
-          kind: _ObjectKind.iceWall,
-          x: 0.18,
+  void _spawnNarrowIcePass({required bool openCenter}) {
+    if (openCenter) {
+      hazards.addAll([
+        _Hazard(
+          kind: _HazardKind.iceWall,
+          x: -0.56,
           z: 0.05,
-          width: 0.20,
+          width: 0.18,
           height: 0.18,
           hp: 999,
         ),
-        _WorldObject(
-          kind: _ObjectKind.iceSpire,
-          x: 0.58,
+        _Hazard(
+          kind: _HazardKind.iceWall,
+          x: 0.56,
           z: 0.05,
-          width: 0.12,
-          height: 0.25,
+          width: 0.18,
+          height: 0.18,
           hp: 999,
         ),
       ]);
     } else {
-      objects.addAll([
-        _WorldObject(
-          kind: _ObjectKind.iceWall,
+      hazards.addAll([
+        _Hazard(
+          kind: _HazardKind.iceSpire,
           x: -0.18,
           z: 0.05,
-          width: 0.20,
-          height: 0.18,
+          width: 0.12,
+          height: 0.25,
           hp: 999,
         ),
-        _WorldObject(
-          kind: _ObjectKind.iceSpire,
-          x: -0.58,
-          z: 0.05,
+        _Hazard(
+          kind: _HazardKind.iceSpire,
+          x: 0.18,
+          z: 0.08,
           width: 0.12,
           height: 0.25,
           hp: 999,
@@ -405,149 +569,184 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     }
   }
 
-  void _spawnGateWithTarget() {
-    final openLeft = _rng.nextBool();
-
-    if (openLeft) {
-      objects.addAll([
-        _WorldObject(
-          kind: _ObjectKind.iceWall,
-          x: 0.24,
-          z: 0.05,
-          width: 0.20,
-          height: 0.18,
-          hp: 999,
-        ),
-        _WorldObject(
-          kind: _ObjectKind.iceSpire,
-          x: 0.62,
-          z: 0.05,
-          width: 0.12,
-          height: 0.25,
-          hp: 999,
-        ),
-        _WorldObject(
-          kind: _ObjectKind.turret,
-          x: -0.22,
-          z: 0.11,
-          width: 0.09,
-          height: 0.17,
-          hp: 2,
-        ),
-      ]);
-    } else {
-      objects.addAll([
-        _WorldObject(
-          kind: _ObjectKind.iceWall,
-          x: -0.24,
-          z: 0.05,
-          width: 0.20,
-          height: 0.18,
-          hp: 999,
-        ),
-        _WorldObject(
-          kind: _ObjectKind.iceSpire,
-          x: -0.62,
-          z: 0.05,
-          width: 0.12,
-          height: 0.25,
-          hp: 999,
-        ),
-        _WorldObject(
-          kind: _ObjectKind.turret,
-          x: 0.22,
-          z: 0.11,
-          width: 0.09,
-          height: 0.17,
-          hp: 2,
-        ),
-      ]);
-    }
+  void _spawnTurretRun() {
+    hazards.addAll([
+      _Hazard(
+        kind: _HazardKind.turret,
+        x: -0.58,
+        z: 0.08,
+        width: 0.10,
+        height: 0.18,
+        hp: 2,
+      ),
+      _Hazard(
+        kind: _HazardKind.turret,
+        x: 0.00,
+        z: 0.11,
+        width: 0.10,
+        height: 0.18,
+        hp: 2,
+      ),
+      _Hazard(
+        kind: _HazardKind.turret,
+        x: 0.58,
+        z: 0.14,
+        width: 0.10,
+        height: 0.18,
+        hp: 2,
+      ),
+    ]);
   }
 
-  void _updateObjects(double dt) {
+  void _spawnFinalPush() {
+    hazards.addAll([
+      _Hazard(
+        kind: _HazardKind.iceWall,
+        x: -0.52,
+        z: 0.05,
+        width: 0.18,
+        height: 0.18,
+        hp: 999,
+      ),
+      _Hazard(
+        kind: _HazardKind.iceWall,
+        x: 0.52,
+        z: 0.05,
+        width: 0.18,
+        height: 0.18,
+        hp: 999,
+      ),
+      _Hazard(
+        kind: _HazardKind.turret,
+        x: -0.18,
+        z: 0.11,
+        width: 0.10,
+        height: 0.18,
+        hp: 2,
+      ),
+      _Hazard(
+        kind: _HazardKind.turret,
+        x: 0.18,
+        z: 0.14,
+        width: 0.10,
+        height: 0.18,
+        hp: 2,
+      ),
+      _Hazard(
+        kind: _HazardKind.drone,
+        x: 0.00,
+        z: 0.17,
+        width: 0.10,
+        height: 0.09,
+        hp: 2,
+      ),
+    ]);
+  }
+
+  void _updateHazards(double dt) {
     final advance = dt * (0.30 + worldSpeed / 860.0);
 
-    for (final o in objects) {
-      o.z += advance * (o.kind == _ObjectKind.drone ? 1.12 : 1.0);
+    for (final h in hazards) {
+      h.z += advance * (h.kind == _HazardKind.drone ? 1.10 : 1.0);
     }
   }
 
-  void _updateShots(double dt) {
-    for (final s in shots) {
-      s.z -= dt * 1.75;
-      if (s.z < 0) {
-        s.active = false;
+  void _handleShooting(double dt) {
+    if (!firePressed) return;
+    if (fireCooldown > 0) return;
+    if (phase != _GamePhase.playing) return;
+
+    fireCooldown = 0.18;
+
+    final target = _chooseSoftAimTarget();
+
+    final start = _shipScreenCenter(playSize);
+    final end = target != null
+        ? _project(playSize, target.x, target.z, shipX, shipY)
+        : Offset(
+            playSize.width * (0.5 + shipX * 0.14),
+            playSize.height * 0.50,
+          );
+
+    bolts.add(_LaserBolt(start: start, end: end));
+
+    if (target != null) {
+      target.hp -= 1;
+      if (target.hp <= 0) {
+        target.active = false;
+        score += target.kind == _HazardKind.drone ? 170 : 95;
+        explosions.add(
+          _Explosion(
+            x: target.x,
+            z: target.z,
+            large: target.kind == _HazardKind.turret,
+          ),
+        );
       }
     }
   }
 
+  _Hazard? _chooseSoftAimTarget() {
+    _Hazard? best;
+    double bestScore = double.infinity;
+
+    for (final h in hazards) {
+      if (!h.active || !h.isShootable) continue;
+
+      // HACKABLE NOTE:
+      // This is the new soft target model.
+      // It favors targets somewhat near the ship and in a good forward depth band.
+      final xDist = (h.x - shipX).abs();
+
+      if (xDist > 0.42) continue;
+      if (h.z < 0.10 || h.z > 0.72) continue;
+
+      final depthBias = (h.z - 0.34).abs();
+      final score = xDist * 1.0 + depthBias * 0.7;
+
+      if (score < bestScore) {
+        bestScore = score;
+        best = h;
+      }
+    }
+
+    return best;
+  }
+
   void _handleCollisions() {
-    for (final o in objects) {
-      if (!o.active) continue;
+    for (final h in hazards) {
+      if (!h.active) continue;
 
-      if (o.z > 0.89) {
-        final hitWidth = o.kind == _ObjectKind.iceWall
-            ? o.width * 1.12
-            : o.width * 1.04;
+      if (h.z > 0.88) {
+        // HACKABLE NOTE:
+        // Bigger, friendlier cinematic ship contact space.
+        final xThreshold = h.kind == _HazardKind.iceWall
+            ? h.width * 1.18
+            : h.width * 1.08;
 
-        final xHit = (o.x - playerX).abs() < hitWidth;
-
-        if (xHit) {
-          o.active = false;
-          hull -= o.isShootable ? 15 : 24;
+        if ((h.x - shipX).abs() < xThreshold) {
+          h.active = false;
+          hull -= h.isShootable ? 15 : 24;
           damageFlash = 0.15;
+
           explosions.add(
-            _Explosion(x: o.x, z: 0.88, large: o.kind != _ObjectKind.drone),
+            _Explosion(
+              x: h.x,
+              z: 0.90,
+              large: h.kind != _HazardKind.drone,
+            ),
           );
         }
       }
 
-      for (final s in shots) {
-        if (!s.active || !o.active) continue;
-        if (!o.isShootable) continue;
-
-        final zHit = (s.z - o.z).abs() < 0.085;
-        final xHit = (s.x - o.x).abs() < (o.width * 1.10);
-        final yHit = s.yBias.abs() < 0.30 || o.kind != _ObjectKind.drone;
-
-        if (zHit && xHit && yHit) {
-          s.active = false;
-          o.hp -= 1;
-
-          if (o.hp <= 0) {
-            o.active = false;
-            score += switch (o.kind) {
-              _ObjectKind.drone => 170,
-              _ObjectKind.turret => 95,
-              _ => 50,
-            };
-            explosions.add(
-              _Explosion(x: o.x, z: o.z, large: o.kind == _ObjectKind.turret),
-            );
-          }
-        }
-      }
-
-      if (o.active && o.z > 1.08) {
-        o.active = false;
+      if (h.active && h.z > 1.10) {
+        h.active = false;
       }
     }
   }
 
   void _cleanup() {
-    objects.removeWhere((o) => !o.active);
-    shots.removeWhere((s) => !s.active);
-  }
-
-  void _fire() {
-    if (phase != _GamePhase.playing) return;
-    if (fireCooldown > 0) return;
-    if (shots.length > 7) return;
-
-    shots.add(_Shot(x: playerX, z: 0.92, yBias: playerY));
-
-    fireCooldown = 0.15;
+    hazards.removeWhere((h) => !h.active);
   }
 
   void _startMission() {
@@ -573,10 +772,9 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     final dx = details.delta.dx / max(1, playSize.width);
     final dy = details.delta.dy / max(1, playSize.height);
 
-    setState(() {
-      targetPlayerX = (targetPlayerX + dx * 2.8).clamp(-0.92, 0.92);
-      targetPlayerY = (targetPlayerY + dy * 2.0).clamp(-0.22, 0.22);
-    });
+    // Direct momentum push for touch.
+    shipVX += dx * 2.5;
+    shipVY += dy * 1.5;
   }
 
   KeyEventResult _onKeyEvent(KeyEvent event) {
@@ -593,8 +791,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
       updateKey((v) => leftPressed = v);
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.arrowRight ||
-        key == LogicalKeyboardKey.keyD) {
+    if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.keyD) {
       updateKey((v) => rightPressed = v);
       return KeyEventResult.handled;
     }
@@ -608,13 +805,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     }
 
     if (key == LogicalKeyboardKey.space) {
-      if (isDown) {
-        firePressed = true;
-        _fire();
-      }
-      if (isUp) {
-        firePressed = false;
-      }
+      if (isDown) firePressed = true;
+      if (isUp) firePressed = false;
       return KeyEventResult.handled;
     }
 
@@ -642,7 +834,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     }
 
     if (isDown && key == LogicalKeyboardKey.keyR) {
-      if (phase == _GamePhase.gameOver || phase == _GamePhase.victory) {
+      if (phase == _GamePhase.victory || phase == _GamePhase.gameOver) {
         _restartRun();
       }
       return KeyEventResult.handled;
@@ -669,13 +861,13 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   String _overlaySubtitle() {
     switch (phase) {
       case _GamePhase.briefing:
-        return 'Break the defense line.\nDodge ice formations. Destroy turrets and drones.';
+        return 'Fly the run.\nThread the ice. Snap turrets and drones when they line up.';
       case _GamePhase.paused:
         return 'Take a breath and resume when ready.';
       case _GamePhase.victory:
         return 'Ice Run cleared.\nFinal score: $score';
       case _GamePhase.gameOver:
-        return 'Your snow run ended in wreckage.\nFinal score: $score';
+        return 'Your run ended in wreckage.\nFinal score: $score';
       case _GamePhase.playing:
         return '';
     }
@@ -720,8 +912,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                   _startMission();
                 } else if (phase == _GamePhase.paused) {
                   _togglePause();
-                } else if (phase == _GamePhase.victory ||
-                    phase == _GamePhase.gameOver) {
+                } else if (phase == _GamePhase.victory || phase == _GamePhase.gameOver) {
                   _restartRun();
                 }
               },
@@ -731,10 +922,10 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                   Positioned.fill(
                     child: CustomPaint(
                       painter: _MissionOnePainter(
-                        playerX: playerX,
-                        playerY: playerY,
-                        objects: objects,
-                        shots: shots,
+                        playerX: shipX,
+                        playerY: shipY,
+                        hazards: hazards,
+                        bolts: bolts,
                         stars: stars,
                         explosions: explosions,
                         accent: const Color(0xFFD9F3FF),
@@ -757,16 +948,11 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                         children: [
                           Expanded(
                             child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 10,
-                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                               decoration: BoxDecoration(
                                 color: const Color(0x55000000),
                                 borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: const Color(0x22FFFFFF),
-                                ),
+                                border: Border.all(color: const Color(0x22FFFFFF)),
                               ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
@@ -792,23 +978,18 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(
-                                            999,
-                                          ),
+                                          borderRadius: BorderRadius.circular(999),
                                           child: LinearProgressIndicator(
                                             value: hull / 100,
                                             minHeight: 10,
-                                            backgroundColor: const Color(
-                                              0x33222222,
-                                            ),
-                                            valueColor:
-                                                AlwaysStoppedAnimation<Color>(
-                                                  hull > 50
-                                                      ? const Color(0xFF7FDBFF)
-                                                      : hull > 25
+                                            backgroundColor: const Color(0x33222222),
+                                            valueColor: AlwaysStoppedAnimation<Color>(
+                                              hull > 50
+                                                  ? const Color(0xFF7FDBFF)
+                                                  : hull > 25
                                                       ? const Color(0xFFFFC857)
                                                       : const Color(0xFFFF6B6B),
-                                                ),
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -816,27 +997,21 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                                       SizedBox(
                                         width: isCompact ? 90 : 150,
                                         child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(
-                                            999,
-                                          ),
+                                          borderRadius: BorderRadius.circular(999),
                                           child: LinearProgressIndicator(
-                                            value: (distance / _missionDistance)
-                                                .clamp(0.0, 1.0),
+                                            value: (_missionDistance == 0)
+                                                ? 0
+                                                : (distance / _missionDistance).clamp(0.0, 1.0),
                                             minHeight: 10,
-                                            backgroundColor: const Color(
-                                              0x33222222,
+                                            backgroundColor: const Color(0x33222222),
+                                            valueColor: const AlwaysStoppedAnimation<Color>(
+                                              Colors.white,
                                             ),
-                                            valueColor:
-                                                const AlwaysStoppedAnimation<
-                                                  Color
-                                                >(Colors.white),
                                           ),
                                         ),
                                       ),
                                       const SizedBox(width: 8),
-                                      Text(
-                                        '${distance.floor()}/${_missionDistance.toInt()}m',
-                                      ),
+                                      Text('${distance.floor()}/${_missionDistance.toInt()}m'),
                                     ],
                                   ),
                                 ],
@@ -844,22 +1019,17 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                             ),
                           ),
                           const SizedBox(width: 10),
-                          if (phase == _GamePhase.playing ||
-                              phase == _GamePhase.paused)
+                          if (phase == _GamePhase.playing || phase == _GamePhase.paused)
                             Container(
                               decoration: BoxDecoration(
                                 color: const Color(0x55000000),
                                 borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: const Color(0x22FFFFFF),
-                                ),
+                                border: Border.all(color: const Color(0x22FFFFFF)),
                               ),
                               child: IconButton(
                                 onPressed: _togglePause,
                                 icon: Icon(
-                                  phase == _GamePhase.paused
-                                      ? Icons.play_arrow
-                                      : Icons.pause,
+                                  phase == _GamePhase.paused ? Icons.play_arrow : Icons.pause,
                                   color: Colors.white,
                                 ),
                               ),
@@ -937,7 +1107,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                                   const SizedBox(height: 12),
                                   Text(
                                     isCompact
-                                        ? 'Touch: drag to steer • hold FIRE'
+                                        ? 'Touch: drag to fly • hold FIRE'
                                         : 'Move: WASD / Arrows • Hold Space to fire • P pause • R restart after end',
                                     textAlign: TextAlign.center,
                                     style: const TextStyle(
@@ -959,16 +1129,9 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                       bottom: 20,
                       child: SafeArea(
                         child: Listener(
-                          onPointerDown: (_) {
-                            setState(() => firePressed = true);
-                            _fire();
-                          },
-                          onPointerUp: (_) {
-                            setState(() => firePressed = false);
-                          },
-                          onPointerCancel: (_) {
-                            setState(() => firePressed = false);
-                          },
+                          onPointerDown: (_) => setState(() => firePressed = true),
+                          onPointerUp: (_) => setState(() => firePressed = false),
+                          onPointerCancel: (_) => setState(() => firePressed = false),
                           child: Container(
                             width: 96,
                             height: 96,
@@ -1008,8 +1171,8 @@ class _MissionOnePainter extends CustomPainter {
   _MissionOnePainter({
     required this.playerX,
     required this.playerY,
-    required this.objects,
-    required this.shots,
+    required this.hazards,
+    required this.bolts,
     required this.stars,
     required this.explosions,
     required this.accent,
@@ -1017,8 +1180,8 @@ class _MissionOnePainter extends CustomPainter {
 
   final double playerX;
   final double playerY;
-  final List<_WorldObject> objects;
-  final List<_Shot> shots;
+  final List<_Hazard> hazards;
+  final List<_LaserBolt> bolts;
   final List<_Star> stars;
   final List<_Explosion> explosions;
   final Color accent;
@@ -1031,13 +1194,13 @@ class _MissionOnePainter extends CustomPainter {
     _paintMountains(canvas, size);
     _paintTrackLines(canvas, size);
 
-    final sorted = [...objects]..sort((a, b) => a.z.compareTo(b.z));
-    for (final o in sorted) {
-      _paintObject(canvas, size, o);
+    final sorted = [...hazards]..sort((a, b) => a.z.compareTo(b.z));
+    for (final h in sorted) {
+      _paintHazard(canvas, size, h);
     }
 
-    for (final s in shots) {
-      _paintShot(canvas, size, s);
+    for (final bolt in bolts) {
+      _paintBolt(canvas, bolt);
     }
 
     for (final e in explosions) {
@@ -1045,19 +1208,19 @@ class _MissionOnePainter extends CustomPainter {
     }
 
     _paintReticle(canvas, size);
-    _paintShipGuide(canvas, size);
+    _paintShipBody(canvas, size);
     _paintCockpit(canvas, size);
   }
 
   void _paintSky(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
-    final p = Paint()
+    final paint = Paint()
       ..shader = const LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
         colors: [Color(0xFF0E1A33), Color(0xFF79B7E6)],
       ).createShader(rect);
-    canvas.drawRect(rect, p);
+    canvas.drawRect(rect, paint);
   }
 
   void _paintStars(Canvas canvas, Size size) {
@@ -1073,21 +1236,16 @@ class _MissionOnePainter extends CustomPainter {
 
   void _paintGround(Canvas canvas, Size size) {
     final horizonY = size.height * 0.42;
-    final groundRect = Rect.fromLTWH(
-      0,
-      horizonY,
-      size.width,
-      size.height - horizonY,
-    );
+    final rect = Rect.fromLTWH(0, horizonY, size.width, size.height - horizonY);
 
     final p = Paint()
       ..shader = const LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
         colors: [Color(0xFF9CC6E3), Color(0xFFDFF5FF)],
-      ).createShader(groundRect);
+      ).createShader(rect);
 
-    canvas.drawRect(groundRect, p);
+    canvas.drawRect(rect, p);
   }
 
   void _paintMountains(Canvas canvas, Size size) {
@@ -1116,6 +1274,7 @@ class _MissionOnePainter extends CustomPainter {
   void _paintTrackLines(Canvas canvas, Size size) {
     final horizonY = size.height * 0.42;
     final centerX = size.width / 2 + playerX * size.width * 0.07;
+
     final p = Paint()
       ..color = Colors.white.withOpacity(0.10)
       ..strokeWidth = 2;
@@ -1152,18 +1311,18 @@ class _MissionOnePainter extends CustomPainter {
     );
   }
 
-  void _paintObject(Canvas canvas, Size size, _WorldObject o) {
-    final pos = _project(size, o.x, o.z, playerX, playerY);
-    final scale = _scaleForZ(o.z);
-    final w = size.width * o.width * scale;
-    final h = size.height * o.height * scale;
+  void _paintHazard(Canvas canvas, Size size, _Hazard h) {
+    final pos = _project(size, h.x, h.z, playerX, playerY);
+    final scale = _scaleForZ(h.z);
+    final w = size.width * h.width * scale;
+    final ht = size.height * h.height * scale;
 
-    switch (o.kind) {
-      case _ObjectKind.iceWall:
+    switch (h.kind) {
+      case _HazardKind.iceWall:
         final rect = Rect.fromCenter(
-          center: Offset(pos.dx, pos.dy - h * 0.5),
+          center: Offset(pos.dx, pos.dy - ht * 0.5),
           width: w,
-          height: h,
+          height: ht,
         );
         canvas.drawRRect(
           RRect.fromRectAndRadius(rect, Radius.circular(max(4, w * 0.08))),
@@ -1178,13 +1337,13 @@ class _MissionOnePainter extends CustomPainter {
         );
         break;
 
-      case _ObjectKind.iceSpire:
+      case _HazardKind.iceSpire:
         final path = Path()
           ..moveTo(pos.dx - w * 0.45, pos.dy)
-          ..lineTo(pos.dx - w * 0.20, pos.dy - h * 0.45)
-          ..lineTo(pos.dx - w * 0.04, pos.dy - h * 0.98)
-          ..lineTo(pos.dx + w * 0.10, pos.dy - h * 0.64)
-          ..lineTo(pos.dx + w * 0.32, pos.dy - h * 0.84)
+          ..lineTo(pos.dx - w * 0.20, pos.dy - ht * 0.45)
+          ..lineTo(pos.dx - w * 0.04, pos.dy - ht * 0.98)
+          ..lineTo(pos.dx + w * 0.10, pos.dy - ht * 0.64)
+          ..lineTo(pos.dx + w * 0.32, pos.dy - ht * 0.84)
           ..lineTo(pos.dx + w * 0.45, pos.dy)
           ..close();
 
@@ -1198,11 +1357,11 @@ class _MissionOnePainter extends CustomPainter {
         );
         break;
 
-      case _ObjectKind.turret:
+      case _HazardKind.turret:
         final base = Rect.fromCenter(
-          center: Offset(pos.dx, pos.dy - h * 0.34),
+          center: Offset(pos.dx, pos.dy - ht * 0.34),
           width: w * 0.72,
-          height: h * 0.54,
+          height: ht * 0.54,
         );
         canvas.drawRRect(
           RRect.fromRectAndRadius(base, const Radius.circular(5)),
@@ -1210,17 +1369,17 @@ class _MissionOnePainter extends CustomPainter {
         );
 
         final barrel = Path()
-          ..moveTo(pos.dx + w * 0.04, pos.dy - h * 0.60)
-          ..lineTo(pos.dx + w * 0.60, pos.dy - h * 0.80)
-          ..lineTo(pos.dx + w * 0.54, pos.dy - h * 0.92)
-          ..lineTo(pos.dx - w * 0.02, pos.dy - h * 0.70)
+          ..moveTo(pos.dx + w * 0.04, pos.dy - ht * 0.60)
+          ..lineTo(pos.dx + w * 0.60, pos.dy - ht * 0.80)
+          ..lineTo(pos.dx + w * 0.54, pos.dy - ht * 0.92)
+          ..lineTo(pos.dx - w * 0.02, pos.dy - ht * 0.70)
           ..close();
         canvas.drawPath(barrel, Paint()..color = const Color(0xFFE16A6A));
 
         final cap = Rect.fromCenter(
-          center: Offset(pos.dx, pos.dy - h * 0.16),
+          center: Offset(pos.dx, pos.dy - ht * 0.16),
           width: w * 0.24,
-          height: h * 0.10,
+          height: ht * 0.10,
         );
         canvas.drawRRect(
           RRect.fromRectAndRadius(cap, const Radius.circular(4)),
@@ -1228,30 +1387,30 @@ class _MissionOnePainter extends CustomPainter {
         );
         break;
 
-      case _ObjectKind.drone:
+      case _HazardKind.drone:
         final bodyPaint = Paint()..color = const Color(0xFFE16A6A);
         final wingPaint = Paint()..color = const Color(0xFFB84D4D);
         final glass = Paint()..color = const Color(0xFFA7EEFF);
 
         final body = RRect.fromRectAndRadius(
           Rect.fromCenter(
-            center: Offset(pos.dx, pos.dy - h * 0.42),
+            center: Offset(pos.dx, pos.dy - ht * 0.42),
             width: w * 0.42,
-            height: h * 0.34,
+            height: ht * 0.34,
           ),
           const Radius.circular(8),
         );
         canvas.drawRRect(body, bodyPaint);
 
         final leftWing = Path()
-          ..moveTo(pos.dx - w * 0.15, pos.dy - h * 0.42)
-          ..lineTo(pos.dx - w * 0.90, pos.dy - h * 0.18)
-          ..lineTo(pos.dx - w * 0.32, pos.dy - h * 0.04)
+          ..moveTo(pos.dx - w * 0.15, pos.dy - ht * 0.42)
+          ..lineTo(pos.dx - w * 0.90, pos.dy - ht * 0.18)
+          ..lineTo(pos.dx - w * 0.32, pos.dy - ht * 0.04)
           ..close();
         final rightWing = Path()
-          ..moveTo(pos.dx + w * 0.15, pos.dy - h * 0.42)
-          ..lineTo(pos.dx + w * 0.90, pos.dy - h * 0.18)
-          ..lineTo(pos.dx + w * 0.32, pos.dy - h * 0.04)
+          ..moveTo(pos.dx + w * 0.15, pos.dy - ht * 0.42)
+          ..lineTo(pos.dx + w * 0.90, pos.dy - ht * 0.18)
+          ..lineTo(pos.dx + w * 0.32, pos.dy - ht * 0.04)
           ..close();
 
         canvas.drawPath(leftWing, wingPaint);
@@ -1259,9 +1418,9 @@ class _MissionOnePainter extends CustomPainter {
 
         canvas.drawOval(
           Rect.fromCenter(
-            center: Offset(pos.dx, pos.dy - h * 0.46),
+            center: Offset(pos.dx, pos.dy - ht * 0.46),
             width: w * 0.14,
-            height: h * 0.12,
+            height: ht * 0.12,
           ),
           glass,
         );
@@ -1269,21 +1428,21 @@ class _MissionOnePainter extends CustomPainter {
     }
   }
 
-  void _paintShot(Canvas canvas, Size size, _Shot s) {
-    final pos = _project(size, s.x, s.z, playerX, playerY);
-    final scale = _scaleForShotZ(s.z);
+  void _paintBolt(Canvas canvas, _LaserBolt bolt) {
+    final alpha = (1.0 - bolt.t).clamp(0.0, 1.0);
 
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromCenter(
-          center: pos,
-          width: size.width * 0.006 * scale + 3,
-          height: size.height * 0.024 * scale + 5,
-        ),
-        const Radius.circular(3),
-      ),
-      Paint()..color = accent,
-    );
+    final core = Paint()
+      ..color = accent.withOpacity(alpha)
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round;
+
+    final glow = Paint()
+      ..color = accent.withOpacity(alpha * 0.25)
+      ..strokeWidth = 8
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawLine(bolt.start, bolt.end, glow);
+    canvas.drawLine(bolt.start, bolt.end, core);
   }
 
   void _paintExplosion(Canvas canvas, Size size, _Explosion e) {
@@ -1317,29 +1476,13 @@ class _MissionOnePainter extends CustomPainter {
       ..strokeWidth = 2;
 
     canvas.drawCircle(center, 18, p);
-    canvas.drawLine(
-      Offset(center.dx - 28, center.dy),
-      Offset(center.dx - 8, center.dy),
-      p,
-    );
-    canvas.drawLine(
-      Offset(center.dx + 8, center.dy),
-      Offset(center.dx + 28, center.dy),
-      p,
-    );
-    canvas.drawLine(
-      Offset(center.dx, center.dy - 28),
-      Offset(center.dx, center.dy - 8),
-      p,
-    );
-    canvas.drawLine(
-      Offset(center.dx, center.dy + 8),
-      Offset(center.dx, center.dy + 28),
-      p,
-    );
+    canvas.drawLine(Offset(center.dx - 28, center.dy), Offset(center.dx - 8, center.dy), p);
+    canvas.drawLine(Offset(center.dx + 8, center.dy), Offset(center.dx + 28, center.dy), p);
+    canvas.drawLine(Offset(center.dx, center.dy - 28), Offset(center.dx, center.dy - 8), p);
+    canvas.drawLine(Offset(center.dx, center.dy + 8), Offset(center.dx, center.dy + 28), p);
   }
 
-  void _paintShipGuide(Canvas canvas, Size size) {
+  void _paintShipBody(Canvas canvas, Size size) {
     final center = Offset(
       size.width * (0.5 + playerX * 0.12),
       size.height * (0.80 + playerY * 0.03),
@@ -1392,10 +1535,25 @@ class _MissionOnePainter extends CustomPainter {
       Rect.fromLTWH(0, size.height - 112, size.width, 112),
       framePaint,
     );
-    canvas.drawRect(Rect.fromLTWH(0, 0, 32, size.height), sidePaint);
     canvas.drawRect(
-      Rect.fromLTWH(size.width - 32, 0, 32, size.height),
+      Rect.fromLTWH(0, 0, 34, size.height),
       sidePaint,
+    );
+    canvas.drawRect(
+      Rect.fromLTWH(size.width - 34, 0, 34, size.height),
+      sidePaint,
+    );
+
+    // Canopy side struts for stronger cockpit feel.
+    canvas.drawLine(
+      Offset(size.width * 0.18, size.height),
+      Offset(size.width * 0.08, size.height * 0.58),
+      linePaint,
+    );
+    canvas.drawLine(
+      Offset(size.width * 0.82, size.height),
+      Offset(size.width * 0.92, size.height * 0.58),
+      linePaint,
     );
 
     canvas.drawLine(
@@ -1405,26 +1563,18 @@ class _MissionOnePainter extends CustomPainter {
     );
   }
 
-  Offset _project(
-    Size size,
-    double x,
-    double z,
-    double playerX,
-    double playerY,
-  ) {
+  Offset _project(Size size, double x, double z, double playerX, double playerY) {
     final horizonY = size.height * 0.42;
     final bottomY = size.height * (0.86 + playerY * 0.025);
     final scale = _scaleForZ(z);
 
-    final screenX = size.width * (0.5 + (x - playerX * 0.52) * 0.28 * scale);
+    final screenX = size.width * (0.5 + (x - playerX * 0.50) * 0.30 * scale);
     final screenY = lerpDouble(horizonY, bottomY, scale)!;
 
     return Offset(screenX, screenY);
   }
 
   double _scaleForZ(double z) => z.clamp(0.06, 1.0);
-
-  double _scaleForShotZ(double z) => z.clamp(0.06, 1.0);
 
   @override
   bool shouldRepaint(covariant _MissionOnePainter oldDelegate) => true;
