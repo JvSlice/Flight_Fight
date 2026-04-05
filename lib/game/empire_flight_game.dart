@@ -40,21 +40,19 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   _GamePhase phase = _GamePhase.briefing;
 
-  // HACKABLE NOTE:
-  // This is a pure flight prototype.
-  // Distance is how far along the run you are.
   static const double _missionDistance = 5600;
-  static const double _baseSpeed = 245;
+  static const double _baseSpeed = 220;
 
   double distance = 0;
   int hull = 100;
   double damageFlash = 0;
+  double collisionCooldown = 0;
 
   // HACKABLE NOTE:
-  // shipX = lateral position relative to the canyon center.
-  // shipY = altitude feeling. Higher = climbing.
+  // shipX = lateral offset from canyon center
+  // shipY = altitude feeling, 0 low / 1 high
   double shipX = 0.0;
-  double shipY = 0.48;
+  double shipY = 0.52;
   double shipVX = 0.0;
   double shipVY = 0.0;
 
@@ -77,8 +75,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
         _SnowParticle(
           x: rng.nextDouble(),
           y: rng.nextDouble(),
-          speed: 0.3 + rng.nextDouble() * 1.2,
-          size: 0.8 + rng.nextDouble() * 1.8,
+          speed: 0.35 + rng.nextDouble() * 1.1,
+          size: 0.8 + rng.nextDouble() * 1.9,
         ),
       );
     }
@@ -101,21 +99,17 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   double get progress => (distance / _missionDistance).clamp(0.0, 1.0);
 
-  double get worldSpeed {
-    // HACKABLE NOTE:
-    // A slight speed build keeps the run from feeling dead,
-    // but this is still mainly about flight feel, not difficulty spikes.
-    return _baseSpeed * (1.0 + progress * 0.12);
-  }
+  double get worldSpeed => _baseSpeed * (1.0 + progress * 0.08);
 
   void _resetRun() {
     phase = _GamePhase.briefing;
     distance = 0;
     hull = 100;
     damageFlash = 0;
+    collisionCooldown = 0;
 
     shipX = 0.0;
-    shipY = 0.48;
+    shipY = 0.52;
     shipVX = 0.0;
     shipVY = 0.0;
 
@@ -154,6 +148,10 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
       damageFlash -= dt;
     }
 
+    if (collisionCooldown > 0) {
+      collisionCooldown -= dt;
+    }
+
     if (phase != _GamePhase.playing) {
       setState(() {});
       return;
@@ -176,21 +174,21 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   void _updateParticles(double dt) {
     for (final p in particles) {
-      p.y += p.speed * dt * 0.35;
+      p.y += p.speed * dt * 0.42;
       if (p.y > 1.05) {
-        p.y = -0.02;
+        p.y = -0.03;
       }
     }
   }
 
   void _updateShip(double dt) {
     // HACKABLE NOTE:
-    // These values are the heart of the feel.
-    const accelX = 3.4;
-    const accelY = 2.6;
-    const damping = 0.885;
-    const maxVX = 1.35;
-    const maxVY = 1.0;
+    // Tune these first for flight feel.
+    const accelX = 3.2;
+    const accelY = 2.5;
+    const damping = 0.89;
+    const maxVX = 1.30;
+    const maxVY = 0.95;
 
     if (leftPressed) shipVX -= accelX * dt;
     if (rightPressed) shipVX += accelX * dt;
@@ -206,13 +204,11 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     shipX += shipVX * dt;
     shipY += shipVY * dt;
 
-    // HACKABLE NOTE:
-    // Broad flight box. This should feel wider than a lane runner.
     shipX = shipX.clamp(-1.1, 1.1);
-    shipY = shipY.clamp(0.10, 0.92);
+    shipY = shipY.clamp(0.14, 0.90);
 
-    if (shipX <= -1.1 || shipX >= 1.1) shipVX *= -0.12;
-    if (shipY <= 0.10 || shipY >= 0.92) shipVY *= -0.10;
+    if (shipX <= -1.1 || shipX >= 1.1) shipVX *= -0.10;
+    if (shipY <= 0.14 || shipY >= 0.90) shipVY *= -0.10;
   }
 
   // ---------------------------------------------------------------------------
@@ -220,61 +216,47 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   // ---------------------------------------------------------------------------
 
   double _pathCenter(double d) {
-    // HACKABLE NOTE:
-    // This is the main broad turn feel.
-    // Lower frequency / larger amplitude = more sweeping canyon.
-    return sin(d / 430.0) * 0.42 +
-        sin(d / 980.0 + 0.8) * 0.22 +
-        sin(d / 210.0 + 1.6) * 0.05;
+    return sin(d / 520.0) * 0.34 +
+        sin(d / 1100.0 + 0.8) * 0.16 +
+        sin(d / 260.0 + 1.6) * 0.03;
   }
 
   double _pathHalfWidth(double d) {
-    // HACKABLE NOTE:
-    // This controls how wide the safe lateral space feels.
-    final base = 0.44 + sin(d / 650.0 + 0.7) * 0.05;
+    final base = 0.52 + sin(d / 700.0 + 0.6) * 0.04;
 
-    final narrow1 = _bump(d, 1500, 260, -0.10);
-    final narrow2 = _bump(d, 3150, 240, -0.12);
-    final narrow3 = _bump(d, 4700, 240, -0.10);
+    final narrow1 = _bump(d, 1800, 360, -0.08);
+    final narrow2 = _bump(d, 3600, 340, -0.10);
+    final narrow3 = _bump(d, 5000, 260, -0.06);
 
-    return (base + narrow1 + narrow2 + narrow3).clamp(0.24, 0.56);
+    return (base + narrow1 + narrow2 + narrow3).clamp(0.34, 0.58);
   }
 
   double _groundHeight(double d) {
-    // HACKABLE NOTE:
-    // This is what gives the feel of climbing and dipping over terrain.
-    final base = 0.18;
-    final waves = sin(d / 260.0 + 0.4) * 0.05 + sin(d / 95.0) * 0.015;
+    final base = 0.20;
+    final waves = sin(d / 340.0 + 0.5) * 0.04 + sin(d / 115.0) * 0.010;
 
-    final hill1 = _bump(d, 900, 260, 0.16);
-    final hill2 = _bump(d, 2350, 220, 0.13);
-    final hill3 = _bump(d, 3980, 280, 0.18);
+    final hill1 = _bump(d, 1200, 320, 0.10);
+    final hill2 = _bump(d, 2650, 260, 0.12);
+    final hill3 = _bump(d, 4300, 320, 0.10);
 
-    return (base + waves + hill1 + hill2 + hill3).clamp(0.08, 0.62);
+    return (base + waves + hill1 + hill2 + hill3).clamp(0.10, 0.52);
   }
 
   double _ceilingHeight(double d) {
-    // HACKABLE NOTE:
-    // Keeps the prototype feeling like a canyon/window flight,
-    // and lets some sections feel lower/tighter overhead.
-    final base = 0.90;
-    final dips = _bump(d, 1700, 240, -0.10) +
-        _bump(d, 3400, 220, -0.08) +
-        _bump(d, 5000, 220, -0.12);
+    final base = 0.92;
+    final dip1 = _bump(d, 2000, 320, -0.05);
+    final dip2 = _bump(d, 3900, 260, -0.05);
 
-    return (base + dips).clamp(0.66, 0.94);
+    return (base + dip1 + dip2).clamp(0.78, 0.94);
   }
 
   double _bump(double x, double center, double width, double amplitude) {
-    final t = ((x - center) / width);
+    final t = (x - center) / width;
     return amplitude * exp(-t * t);
   }
 
   void _checkTerrainCollision() {
-    // HACKABLE NOTE:
-    // Use a near-future sample so contact feels like flying into terrain,
-    // not being hit by a sprite at the last instant.
-    final sampleD = distance + 70;
+    final sampleD = distance + 90;
 
     final center = _pathCenter(sampleD);
     final halfWidth = _pathHalfWidth(sampleD);
@@ -282,13 +264,14 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     final ceiling = _ceilingHeight(sampleD);
 
     final lateralError = (shipX - center).abs();
-    final hitWall = lateralError > halfWidth * 0.98;
-    final hitGround = shipY < floor + 0.05;
-    final hitCeiling = shipY > ceiling - 0.04;
+    final hitWall = lateralError > halfWidth * 1.04;
+    final hitGround = shipY < floor + 0.015;
+    final hitCeiling = shipY > ceiling - 0.02;
 
-    if (hitWall || hitGround || hitCeiling) {
-      hull -= 2;
-      damageFlash = 0.08;
+    if ((hitWall || hitGround || hitCeiling) && collisionCooldown <= 0) {
+      hull -= 6;
+      damageFlash = 0.10;
+      collisionCooldown = 0.20;
     }
   }
 
@@ -319,10 +302,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     final dx = details.delta.dx / max(1, playSize.width);
     final dy = details.delta.dy / max(1, playSize.height);
 
-    // HACKABLE NOTE:
-    // Touch directly adds momentum.
     shipVX += dx * 3.0;
-    shipVY += (-dy) * 2.3;
+    shipVY += (-dy) * 2.4;
   }
 
   KeyEventResult _onKeyEvent(KeyEvent event) {
@@ -392,7 +373,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   String _overlayTitle() {
     switch (phase) {
       case _GamePhase.briefing:
-        return 'HOTH FLIGHT TEST';
+        return 'READABLE CANYON TEST';
       case _GamePhase.paused:
         return 'PAUSED';
       case _GamePhase.victory:
@@ -407,13 +388,13 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   String _overlaySubtitle() {
     switch (phase) {
       case _GamePhase.briefing:
-        return 'No weapons yet.\nJust feel the cockpit, terrain, turns, climbs, and dips.';
+        return 'This version is about route readability.\nFollow the bright trench through the Hoth canyon.';
       case _GamePhase.paused:
         return 'Pause and take a breath.';
       case _GamePhase.victory:
-        return 'You completed the full Hoth flight test.';
+        return 'You completed the full canyon flight test.';
       case _GamePhase.crashed:
-        return 'The terrain won this run.';
+        return 'You lost the canyon line.';
       case _GamePhase.playing:
         return '';
     }
@@ -467,7 +448,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                 children: [
                   Positioned.fill(
                     child: CustomPaint(
-                      painter: _CockpitFlightPainter(
+                      painter: _ReadableCanyonPainter(
                         playerX: shipX,
                         playerY: shipY,
                         distance: distance,
@@ -509,8 +490,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                                   Expanded(
                                     child: Text(
                                       phase == _GamePhase.playing
-                                          ? 'Snow Speeder Flight'
-                                          : 'Hoth Flight Prototype',
+                                          ? 'Hoth Canyon Flight'
+                                          : 'Readable Canyon Prototype',
                                       style: const TextStyle(
                                         fontWeight: FontWeight.bold,
                                         letterSpacing: 0.8,
@@ -673,8 +654,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   }
 }
 
-class _CockpitFlightPainter extends CustomPainter {
-  _CockpitFlightPainter({
+class _ReadableCanyonPainter extends CustomPainter {
+  _ReadableCanyonPainter({
     required this.playerX,
     required this.playerY,
     required this.distance,
@@ -702,7 +683,7 @@ class _CockpitFlightPainter extends CustomPainter {
     _paintSky(canvas, size);
     _paintFarSnow(canvas, size);
     _paintMountains(canvas, size);
-    _paintWorldRibbon(canvas, size);
+    _paintReadableCanyon(canvas, size);
     _paintParticles(canvas, size);
     _paintCockpitGlassLines(canvas, size);
     _paintCockpitInterior(canvas, size);
@@ -769,9 +750,9 @@ class _CockpitFlightPainter extends CustomPainter {
     );
   }
 
-  void _paintWorldRibbon(Canvas canvas, Size size) {
+  void _paintReadableCanyon(Canvas canvas, Size size) {
     final horizonY = size.height * 0.43;
-    final bottomY = size.height * 0.94;
+    final bottomY = size.height * 0.95;
 
     final leftWallOuter = <Offset>[];
     final leftWallInner = <Offset>[];
@@ -779,17 +760,18 @@ class _CockpitFlightPainter extends CustomPainter {
     final rightWallOuter = <Offset>[];
     final floorLeft = <Offset>[];
     final floorRight = <Offset>[];
-    final ceilingLeft = <Offset>[];
-    final ceilingRight = <Offset>[];
+    final centerLine = <Offset>[];
+    final leftEdge = <Offset>[];
+    final rightEdge = <Offset>[];
 
-    const samples = 40;
-    const lookAhead = 900.0;
+    const samples = 44;
+    const lookAhead = 1000.0;
 
     for (int i = 0; i < samples; i++) {
       final t = i / (samples - 1);
       final d = distance + t * lookAhead;
 
-      final scale = lerpDouble(0.06, 1.0, pow(t, 1.55).toDouble())!;
+      final scale = lerpDouble(0.06, 1.0, pow(t, 1.42).toDouble())!;
       final worldCenter = pathCenterFn(d);
       final worldHalf = pathHalfWidthFn(d);
       final floorH = groundHeightFn(d);
@@ -804,15 +786,17 @@ class _CockpitFlightPainter extends CustomPainter {
           (0.5 + ((worldCenter + worldHalf) - playerX) * 0.34 * scale);
 
       final leftOuterX = size.width *
-          (0.5 + ((worldCenter - worldHalf - 0.30) - playerX) * 0.34 * scale);
+          (0.5 + ((worldCenter - worldHalf - 0.34) - playerX) * 0.34 * scale);
       final rightOuterX = size.width *
-          (0.5 + ((worldCenter + worldHalf + 0.30) - playerX) * 0.34 * scale);
+          (0.5 + ((worldCenter + worldHalf + 0.34) - playerX) * 0.34 * scale);
 
       final baseFloorY = lerpDouble(horizonY + 18, bottomY, scale)!;
-      final floorY = baseFloorY + (floorH - playerY) * size.height * 0.42 * scale;
+      final floorY =
+          baseFloorY + (floorH - playerY) * size.height * 0.42 * scale;
 
-      final ceilingBaseY = lerpDouble(horizonY - 10, size.height * 0.70, scale)!;
-      final ceilingY = ceilingBaseY + (ceilingH - playerY) * size.height * 0.22 * scale;
+      final ceilingBaseY = lerpDouble(horizonY - 6, size.height * 0.70, scale)!;
+      final ceilingY =
+          ceilingBaseY + (ceilingH - playerY) * size.height * 0.18 * scale;
 
       leftWallOuter.add(Offset(leftOuterX, floorY));
       leftWallInner.add(Offset(leftInnerX, floorY));
@@ -822,24 +806,12 @@ class _CockpitFlightPainter extends CustomPainter {
       floorLeft.add(Offset(leftInnerX, floorY));
       floorRight.add(Offset(rightInnerX, floorY));
 
-      // keep a light sense of overhead shaping
-      final ceilingHalf = max(worldHalf * 0.78, 0.18);
-      final ceilLeftX = size.width *
-          (0.5 + ((worldCenter - ceilingHalf) - playerX) * 0.34 * scale);
-      final ceilRightX = size.width *
-          (0.5 + ((worldCenter + ceilingHalf) - playerX) * 0.34 * scale);
+      leftEdge.add(Offset(leftInnerX, floorY));
+      rightEdge.add(Offset(rightInnerX, floorY));
 
-      ceilingLeft.add(Offset(ceilLeftX, ceilingY));
-      ceilingRight.add(Offset(ceilRightX, ceilingY));
-
-      // Center guide streaks for speed / path feel
-      if (i < samples - 1 && i.isEven) {
-        canvas.drawCircle(
-          Offset(screenCenterX, floorY - 6),
-          max(0.8, 1.2 * scale),
-          Paint()..color = Colors.white.withOpacity(0.10),
-        );
-      }
+      // Brighter center guidance so the route is obvious.
+      final centerY = lerpDouble(floorY - 10, ceilingY + 26, 0.10)!;
+      centerLine.add(Offset(screenCenterX, centerY));
     }
 
     // Left wall
@@ -855,7 +827,7 @@ class _CockpitFlightPainter extends CustomPainter {
 
     canvas.drawPath(
       leftWallPath,
-      Paint()..color = const Color(0x88D4F4FF),
+      Paint()..color = const Color(0x99D4F4FF),
     );
 
     // Right wall
@@ -871,7 +843,7 @@ class _CockpitFlightPainter extends CustomPainter {
 
     canvas.drawPath(
       rightWallPath,
-      Paint()..color = const Color(0x88D4F4FF),
+      Paint()..color = const Color(0x99D4F4FF),
     );
 
     // Floor ribbon
@@ -891,50 +863,77 @@ class _CockpitFlightPainter extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Color(0x99E7FBFF),
-            Color(0xFFF4FDFF),
+            Color(0xBBE7FBFF),
+            Color(0xFFF8FDFF),
           ],
         ).createShader(Rect.fromLTWH(0, horizonY, size.width, size.height)),
     );
 
-    // Floor edge lines
+    // Strong readable canyon edges
     final edgePaint = Paint()
-      ..color = Colors.white.withOpacity(0.28)
-      ..strokeWidth = 2
+      ..color = Colors.white.withOpacity(0.40)
+      ..strokeWidth = 2.5
       ..style = PaintingStyle.stroke;
 
-    final leftEdge = Path()..moveTo(floorLeft.first.dx, floorLeft.first.dy);
-    for (final p in floorLeft.skip(1)) {
-      leftEdge.lineTo(p.dx, p.dy);
-    }
-    final rightEdge = Path()..moveTo(floorRight.first.dx, floorRight.first.dy);
-    for (final p in floorRight.skip(1)) {
-      rightEdge.lineTo(p.dx, p.dy);
+    final leftEdgePath = Path()..moveTo(leftEdge.first.dx, leftEdge.first.dy);
+    for (final p in leftEdge.skip(1)) {
+      leftEdgePath.lineTo(p.dx, p.dy);
     }
 
-    canvas.drawPath(leftEdge, edgePaint);
-    canvas.drawPath(rightEdge, edgePaint);
-
-    // Ceiling guide
-    final ceilPaint = Paint()
-      ..color = Colors.white.withOpacity(0.08)
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke;
-
-    final ceilLeftPath = Path()
-      ..moveTo(ceilingLeft.first.dx, ceilingLeft.first.dy);
-    for (final p in ceilingLeft.skip(1)) {
-      ceilLeftPath.lineTo(p.dx, p.dy);
+    final rightEdgePath = Path()..moveTo(rightEdge.first.dx, rightEdge.first.dy);
+    for (final p in rightEdge.skip(1)) {
+      rightEdgePath.lineTo(p.dx, p.dy);
     }
 
-    final ceilRightPath = Path()
-      ..moveTo(ceilingRight.first.dx, ceilingRight.first.dy);
-    for (final p in ceilingRight.skip(1)) {
-      ceilRightPath.lineTo(p.dx, p.dy);
+    canvas.drawPath(leftEdgePath, edgePaint);
+    canvas.drawPath(rightEdgePath, edgePaint);
+
+    // Center trench glow / guide
+    final centerGlow = Paint()
+      ..color = accent.withOpacity(0.18)
+      ..strokeWidth = 14
+      ..strokeCap = StrokeCap.round;
+
+    final centerCore = Paint()
+      ..color = accent.withOpacity(0.46)
+      ..strokeWidth = 2.5
+      ..strokeCap = StrokeCap.round;
+
+    final centerPath = Path()..moveTo(centerLine.first.dx, centerLine.first.dy);
+    for (final p in centerLine.skip(1)) {
+      centerPath.lineTo(p.dx, p.dy);
     }
 
-    canvas.drawPath(ceilLeftPath, ceilPaint);
-    canvas.drawPath(ceilRightPath, ceilPaint);
+    canvas.drawPath(centerPath, centerGlow);
+    canvas.drawPath(centerPath, centerCore);
+
+    // Light terrain stripes to help forward-motion reading
+    final stripePaint = Paint()
+      ..color = Colors.white.withOpacity(0.10)
+      ..strokeWidth = 1.2;
+
+    for (int i = 6; i < centerLine.length; i += 4) {
+      final c = centerLine[i];
+      final l = leftEdge[i];
+      final r = rightEdge[i];
+
+      final t = i / (centerLine.length - 1);
+      final half = lerpDouble(8.0, 44.0, t)!;
+
+      final dirX = (r.dx - l.dx);
+      final dirY = (r.dy - l.dy);
+      final len = sqrt(dirX * dirX + dirY * dirY);
+      if (len <= 0.0001) continue;
+
+      final nx = dirX / len;
+      final ny = dirY / len;
+
+      canvas.drawLine(
+        Offset(c.dx - nx * half, c.dy - ny * half),
+        Offset(c.dx + nx * half, c.dy + ny * half),
+        stripePaint,
+      );
+    }
   }
 
   void _paintParticles(Canvas canvas, Size size) {
@@ -944,18 +943,17 @@ class _CockpitFlightPainter extends CustomPainter {
       canvas.drawCircle(
         Offset(x, y),
         p.size,
-        Paint()..color = Colors.white.withOpacity(0.16),
+        Paint()..color = Colors.white.withOpacity(0.15),
       );
     }
   }
 
   void _paintCockpitGlassLines(Canvas canvas, Size size) {
     final linePaint = Paint()
-      ..color = accent.withOpacity(0.22)
+      ..color = accent.withOpacity(0.24)
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
 
-    // Main window outline
     final frame = Path()
       ..moveTo(size.width * 0.16, size.height * 0.92)
       ..lineTo(size.width * 0.12, size.height * 0.58)
@@ -966,7 +964,6 @@ class _CockpitFlightPainter extends CustomPainter {
 
     canvas.drawPath(frame, linePaint);
 
-    // Windshield segmentation / canopy lines
     canvas.drawLine(
       Offset(size.width * 0.50, size.height * 0.16),
       Offset(size.width * 0.50, size.height * 0.40),
@@ -985,7 +982,6 @@ class _CockpitFlightPainter extends CustomPainter {
       linePaint,
     );
 
-    // Small windshield detail lines
     final detailPaint = Paint()
       ..color = accent.withOpacity(0.12)
       ..strokeWidth = 1.2;
@@ -1010,7 +1006,6 @@ class _CockpitFlightPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5;
 
-    // Main lower dash
     final dashPath = Path()
       ..moveTo(0, size.height)
       ..lineTo(size.width * 0.14, size.height * 0.84)
@@ -1022,7 +1017,6 @@ class _CockpitFlightPainter extends CustomPainter {
 
     canvas.drawPath(dashPath, darkPanel);
 
-    // Nose / center housing
     final nosePath = Path()
       ..moveTo(size.width * 0.42, size.height)
       ..lineTo(size.width * 0.46, size.height * 0.86)
@@ -1032,7 +1026,6 @@ class _CockpitFlightPainter extends CustomPainter {
 
     canvas.drawPath(nosePath, midPanel);
 
-    // Left mini screen cluster
     _drawPanelScreen(
       canvas,
       Rect.fromLTWH(size.width * 0.10, size.height * 0.84, size.width * 0.11, size.height * 0.055),
@@ -1045,8 +1038,6 @@ class _CockpitFlightPainter extends CustomPainter {
       accent,
       bezel,
     );
-
-    // Right mini screen cluster
     _drawPanelScreen(
       canvas,
       Rect.fromLTWH(size.width * 0.79, size.height * 0.84, size.width * 0.11, size.height * 0.055),
@@ -1060,7 +1051,6 @@ class _CockpitFlightPainter extends CustomPainter {
       bezel,
     );
 
-    // Small buttons / toggles
     final buttonPaint = Paint()..color = accent.withOpacity(0.32);
     for (int i = 0; i < 4; i++) {
       canvas.drawCircle(
@@ -1075,7 +1065,6 @@ class _CockpitFlightPainter extends CustomPainter {
       );
     }
 
-    // Cockpit edge shading
     final sideShade = Paint()..color = const Color(0x66081118);
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width * 0.06, size.height), sideShade);
     canvas.drawRect(
@@ -1126,5 +1115,5 @@ class _CockpitFlightPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _CockpitFlightPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _ReadableCanyonPainter oldDelegate) => true;
 }
