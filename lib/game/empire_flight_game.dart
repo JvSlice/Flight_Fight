@@ -35,13 +35,14 @@ class _SnowParticle {
 
 class _EmpireFlightGameState extends State<EmpireFlightGame> {
   final FocusNode _keyboardFocus = FocusNode();
+
   Timer? _loop;
   DateTime? _lastTick;
 
   _GamePhase phase = _GamePhase.briefing;
 
-  static const double _missionDistance = 5600;
-  static const double _baseSpeed = 220;
+  static const double _missionDistance = 5200;
+  static const double _baseSpeed = 215;
 
   double distance = 0;
   int hull = 100;
@@ -49,10 +50,10 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   double collisionCooldown = 0;
 
   // HACKABLE NOTE:
-  // shipX = lateral offset from canyon center
-  // shipY = altitude feeling, 0 low / 1 high
+  // shipX = lateral offset from trench center
+  // shipY = altitude feeling, 0 = low, 1 = high
   double shipX = 0.0;
-  double shipY = 0.52;
+  double shipY = 0.56;
   double shipVX = 0.0;
   double shipVY = 0.0;
 
@@ -62,6 +63,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   bool downPressed = false;
 
   final List<_SnowParticle> particles = [];
+  final Random rng = Random();
 
   Size playSize = const Size(1000, 700);
 
@@ -69,14 +71,13 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   void initState() {
     super.initState();
 
-    final rng = Random();
     for (int i = 0; i < 120; i++) {
       particles.add(
         _SnowParticle(
           x: rng.nextDouble(),
           y: rng.nextDouble(),
           speed: 0.35 + rng.nextDouble() * 1.1,
-          size: 0.8 + rng.nextDouble() * 1.9,
+          size: 0.8 + rng.nextDouble() * 1.8,
         ),
       );
     }
@@ -109,7 +110,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     collisionCooldown = 0;
 
     shipX = 0.0;
-    shipY = 0.52;
+    shipY = 0.56;
     shipVX = 0.0;
     shipVY = 0.0;
 
@@ -174,21 +175,22 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   void _updateParticles(double dt) {
     for (final p in particles) {
-      p.y += p.speed * dt * 0.42;
-      if (p.y > 1.05) {
+      p.y += p.speed * dt * 0.40;
+      if (p.y > 1.04) {
         p.y = -0.03;
+        p.x = rng.nextDouble();
       }
     }
   }
 
   void _updateShip(double dt) {
     // HACKABLE NOTE:
-    // Tune these first for flight feel.
-    const accelX = 3.2;
-    const accelY = 2.5;
-    const damping = 0.89;
-    const maxVX = 1.30;
-    const maxVY = 0.95;
+    // Tune these four values first for flight feel.
+    const accelX = 3.0;
+    const accelY = 2.4;
+    const damping = 0.90;
+    const maxVX = 1.20;
+    const maxVY = 0.90;
 
     if (leftPressed) shipVX -= accelX * dt;
     if (rightPressed) shipVX += accelX * dt;
@@ -204,11 +206,11 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     shipX += shipVX * dt;
     shipY += shipVY * dt;
 
-    shipX = shipX.clamp(-1.1, 1.1);
-    shipY = shipY.clamp(0.14, 0.90);
+    shipX = shipX.clamp(-1.0, 1.0);
+    shipY = shipY.clamp(0.18, 0.90);
 
-    if (shipX <= -1.1 || shipX >= 1.1) shipVX *= -0.10;
-    if (shipY <= 0.14 || shipY >= 0.90) shipVY *= -0.10;
+    if (shipX <= -1.0 || shipX >= 1.0) shipVX *= -0.12;
+    if (shipY <= 0.18 || shipY >= 0.90) shipVY *= -0.10;
   }
 
   // ---------------------------------------------------------------------------
@@ -217,37 +219,32 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
   double _pathCenter(double d) {
     return sin(d / 520.0) * 0.34 +
-        sin(d / 1100.0 + 0.8) * 0.16 +
-        sin(d / 260.0 + 1.6) * 0.03;
+        sin(d / 1150.0 + 0.8) * 0.18 +
+        sin(d / 260.0 + 1.2) * 0.03;
   }
 
   double _pathHalfWidth(double d) {
-    final base = 0.52 + sin(d / 700.0 + 0.6) * 0.04;
-
-    final narrow1 = _bump(d, 1800, 360, -0.08);
-    final narrow2 = _bump(d, 3600, 340, -0.10);
-    final narrow3 = _bump(d, 5000, 260, -0.06);
-
-    return (base + narrow1 + narrow2 + narrow3).clamp(0.34, 0.58);
+    final base = 0.54 + sin(d / 820.0 + 0.7) * 0.03;
+    final narrow1 = _bump(d, 1800, 380, -0.08);
+    final narrow2 = _bump(d, 3450, 340, -0.10);
+    final narrow3 = _bump(d, 4650, 260, -0.06);
+    return (base + narrow1 + narrow2 + narrow3).clamp(0.36, 0.60);
   }
 
   double _groundHeight(double d) {
-    final base = 0.20;
-    final waves = sin(d / 340.0 + 0.5) * 0.04 + sin(d / 115.0) * 0.010;
-
+    final base = 0.18;
+    final waves = sin(d / 340.0 + 0.4) * 0.035 + sin(d / 110.0) * 0.010;
     final hill1 = _bump(d, 1200, 320, 0.10);
-    final hill2 = _bump(d, 2650, 260, 0.12);
-    final hill3 = _bump(d, 4300, 320, 0.10);
-
+    final hill2 = _bump(d, 2550, 260, 0.12);
+    final hill3 = _bump(d, 4250, 300, 0.09);
     return (base + waves + hill1 + hill2 + hill3).clamp(0.10, 0.52);
   }
 
   double _ceilingHeight(double d) {
-    final base = 0.92;
-    final dip1 = _bump(d, 2000, 320, -0.05);
-    final dip2 = _bump(d, 3900, 260, -0.05);
-
-    return (base + dip1 + dip2).clamp(0.78, 0.94);
+    final base = 0.94;
+    final dip1 = _bump(d, 2150, 320, -0.05);
+    final dip2 = _bump(d, 3950, 260, -0.05);
+    return (base + dip1 + dip2).clamp(0.80, 0.96);
   }
 
   double _bump(double x, double center, double width, double amplitude) {
@@ -256,15 +253,14 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   }
 
   void _checkTerrainCollision() {
-    final sampleD = distance + 90;
+    final sampleD = distance + 80;
 
     final center = _pathCenter(sampleD);
     final halfWidth = _pathHalfWidth(sampleD);
     final floor = _groundHeight(sampleD);
     final ceiling = _ceilingHeight(sampleD);
 
-    final lateralError = (shipX - center).abs();
-    final hitWall = lateralError > halfWidth * 1.04;
+    final hitWall = (shipX - center).abs() > halfWidth * 1.02;
     final hitGround = shipY < floor + 0.015;
     final hitCeiling = shipY > ceiling - 0.02;
 
@@ -302,8 +298,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     final dx = details.delta.dx / max(1, playSize.width);
     final dy = details.delta.dy / max(1, playSize.height);
 
-    shipVX += dx * 3.0;
-    shipVY += (-dy) * 2.4;
+    shipVX += dx * 2.8;
+    shipVY += (-dy) * 2.3;
   }
 
   KeyEventResult _onKeyEvent(KeyEvent event) {
@@ -366,14 +362,10 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
     return KeyEventResult.ignored;
   }
 
-  // ---------------------------------------------------------------------------
-  // UI text
-  // ---------------------------------------------------------------------------
-
   String _overlayTitle() {
     switch (phase) {
       case _GamePhase.briefing:
-        return 'READABLE CANYON TEST';
+        return 'DEPTH FLIGHT TEST';
       case _GamePhase.paused:
         return 'PAUSED';
       case _GamePhase.victory:
@@ -388,13 +380,13 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   String _overlaySubtitle() {
     switch (phase) {
       case _GamePhase.briefing:
-        return 'This version is about route readability.\nFollow the bright trench through the Hoth canyon.';
+        return 'Follow the bright trench.\nThis version is focused on forward motion and route readability.';
       case _GamePhase.paused:
         return 'Pause and take a breath.';
       case _GamePhase.victory:
-        return 'You completed the full canyon flight test.';
+        return 'You completed the flight test.';
       case _GamePhase.crashed:
-        return 'You lost the canyon line.';
+        return 'You drifted out of the canyon line.';
       case _GamePhase.playing:
         return '';
     }
@@ -448,7 +440,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                 children: [
                   Positioned.fill(
                     child: CustomPaint(
-                      painter: _ReadableCanyonPainter(
+                      painter: _DepthFlightPainter(
                         playerX: shipX,
                         playerY: shipY,
                         distance: distance,
@@ -464,9 +456,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
 
                   if (damageFlash > 0)
                     Positioned.fill(
-                      child: Container(
-                        color: Colors.red.withOpacity(0.10),
-                      ),
+                      child: Container(color: Colors.red.withOpacity(0.10)),
                     ),
 
                   Positioned(
@@ -475,11 +465,10 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                     top: 12,
                     child: SafeArea(
                       child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                               decoration: BoxDecoration(
                                 color: const Color(0x55000000),
                                 borderRadius: BorderRadius.circular(14),
@@ -487,22 +476,19 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                               ),
                               child: Row(
                                 children: [
-                                  Expanded(
+                                  const Expanded(
                                     child: Text(
-                                      phase == _GamePhase.playing
-                                          ? 'Hoth Canyon Flight'
-                                          : 'Readable Canyon Prototype',
-                                      style: const TextStyle(
+                                      'Hoth Flight',
+                                      style: TextStyle(
                                         fontWeight: FontWeight.bold,
-                                        letterSpacing: 0.8,
+                                        letterSpacing: 0.7,
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 10),
                                   const Text('Hull'),
                                   const SizedBox(width: 8),
                                   SizedBox(
-                                    width: isCompact ? 90 : 130,
+                                    width: isCompact ? 82 : 120,
                                     child: ClipRRect(
                                       borderRadius: BorderRadius.circular(999),
                                       child: LinearProgressIndicator(
@@ -519,23 +505,20 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 12),
+                                  const SizedBox(width: 10),
                                   SizedBox(
-                                    width: isCompact ? 90 : 150,
+                                    width: isCompact ? 82 : 130,
                                     child: ClipRRect(
                                       borderRadius: BorderRadius.circular(999),
                                       child: LinearProgressIndicator(
                                         value: progress,
                                         minHeight: 10,
                                         backgroundColor: const Color(0x33222222),
-                                        valueColor: const AlwaysStoppedAnimation<Color>(
-                                          Colors.white,
-                                        ),
                                       ),
                                     ),
                                   ),
                                   const SizedBox(width: 8),
-                                  Text('${distance.floor()}/${_missionDistance.toInt()}m'),
+                                  Text('${distance.floor()}m'),
                                 ],
                               ),
                             ),
@@ -567,7 +550,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                         color: const Color(0x88000000),
                         child: Center(
                           child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 580),
+                            constraints: const BoxConstraints(maxWidth: 560),
                             child: Container(
                               margin: const EdgeInsets.all(20),
                               padding: const EdgeInsets.all(24),
@@ -588,7 +571,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                                     style: const TextStyle(
                                       fontSize: 28,
                                       fontWeight: FontWeight.bold,
-                                      letterSpacing: 1.3,
+                                      letterSpacing: 1.2,
                                     ),
                                   ),
                                   const SizedBox(height: 12),
@@ -619,10 +602,7 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
                                       }
                                     },
                                     child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 14,
-                                        vertical: 12,
-                                      ),
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                                       child: Text(_overlayButtonText()),
                                     ),
                                   ),
@@ -654,8 +634,8 @@ class _EmpireFlightGameState extends State<EmpireFlightGame> {
   }
 }
 
-class _ReadableCanyonPainter extends CustomPainter {
-  _ReadableCanyonPainter({
+class _DepthFlightPainter extends CustomPainter {
+  _DepthFlightPainter({
     required this.playerX,
     required this.playerY,
     required this.distance,
@@ -681,11 +661,10 @@ class _ReadableCanyonPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     _paintSky(canvas, size);
-    _paintFarSnow(canvas, size);
-    _paintMountains(canvas, size);
-    _paintReadableCanyon(canvas, size);
+    _paintFarBackground(canvas, size);
+    _paintDepthTrench(canvas, size);
     _paintParticles(canvas, size);
-    _paintCockpitGlassLines(canvas, size);
+    _paintCockpitWindow(canvas, size);
     _paintCockpitInterior(canvas, size);
   }
 
@@ -705,36 +684,31 @@ class _ReadableCanyonPainter extends CustomPainter {
     canvas.drawRect(rect, paint);
   }
 
-  void _paintFarSnow(Canvas canvas, Size size) {
+  void _paintFarBackground(Canvas canvas, Size size) {
     final horizonY = size.height * 0.43;
-    final rect = Rect.fromLTWH(0, horizonY, size.width, size.height - horizonY);
 
-    final paint = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [
-          Color(0xFFB8D4E8),
-          Color(0xFFEAF7FF),
-        ],
-      ).createShader(rect);
+    final farSnow = Rect.fromLTWH(0, horizonY, size.width, size.height - horizonY);
+    canvas.drawRect(
+      farSnow,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFFBEDAEB), Color(0xFFF0FAFF)],
+        ).createShader(farSnow),
+    );
 
-    canvas.drawRect(rect, paint);
-  }
-
-  void _paintMountains(Canvas canvas, Size size) {
-    final horizonY = size.height * 0.43;
     final mountainPath = Path()..moveTo(0, horizonY);
 
     final peaks = [
-      Offset(size.width * 0.00, horizonY - 20),
-      Offset(size.width * 0.08, horizonY - 42),
-      Offset(size.width * 0.16, horizonY - 12),
-      Offset(size.width * 0.30, horizonY - 58),
-      Offset(size.width * 0.42, horizonY - 20),
-      Offset(size.width * 0.56, horizonY - 64),
-      Offset(size.width * 0.72, horizonY - 18),
-      Offset(size.width * 0.88, horizonY - 46),
+      Offset(size.width * 0.00, horizonY - 18),
+      Offset(size.width * 0.08, horizonY - 40),
+      Offset(size.width * 0.17, horizonY - 10),
+      Offset(size.width * 0.30, horizonY - 55),
+      Offset(size.width * 0.44, horizonY - 18),
+      Offset(size.width * 0.57, horizonY - 60),
+      Offset(size.width * 0.73, horizonY - 14),
+      Offset(size.width * 0.89, horizonY - 42),
       Offset(size.width, horizonY - 20),
     ];
 
@@ -746,187 +720,165 @@ class _ReadableCanyonPainter extends CustomPainter {
 
     canvas.drawPath(
       mountainPath,
-      Paint()..color = const Color(0x66F1FBFF),
+      Paint()..color = const Color(0x66F3FBFF),
     );
   }
 
-  void _paintReadableCanyon(Canvas canvas, Size size) {
+  void _paintDepthTrench(Canvas canvas, Size size) {
     final horizonY = size.height * 0.43;
-    final bottomY = size.height * 0.95;
+    final bottomY = size.height * 0.96;
 
-    final leftWallOuter = <Offset>[];
-    final leftWallInner = <Offset>[];
-    final rightWallInner = <Offset>[];
-    final rightWallOuter = <Offset>[];
-    final floorLeft = <Offset>[];
-    final floorRight = <Offset>[];
-    final centerLine = <Offset>[];
-    final leftEdge = <Offset>[];
-    final rightEdge = <Offset>[];
+    final leftOuter = <Offset>[];
+    final leftInner = <Offset>[];
+    final rightInner = <Offset>[];
+    final rightOuter = <Offset>[];
+    final centerPoints = <Offset>[];
+    final stripeLeft = <Offset>[];
+    final stripeRight = <Offset>[];
 
-    const samples = 44;
-    const lookAhead = 1000.0;
+    const samples = 48;
+    const lookAhead = 1100.0;
 
     for (int i = 0; i < samples; i++) {
       final t = i / (samples - 1);
       final d = distance + t * lookAhead;
 
-      final scale = lerpDouble(0.06, 1.0, pow(t, 1.42).toDouble())!;
-      final worldCenter = pathCenterFn(d);
-      final worldHalf = pathHalfWidthFn(d);
-      final floorH = groundHeightFn(d);
-      final ceilingH = ceilingHeightFn(d);
+      final scale = lerpDouble(0.05, 1.0, pow(t, 1.36).toDouble())!;
+      final center = pathCenterFn(d);
+      final halfWidth = pathHalfWidthFn(d);
+      final ground = groundHeightFn(d);
+      final ceiling = ceilingHeightFn(d);
 
       final screenCenterX =
-          size.width * (0.5 + (worldCenter - playerX) * 0.34 * scale);
+          size.width * (0.5 + (center - playerX) * 0.34 * scale);
 
-      final leftInnerX = size.width *
-          (0.5 + ((worldCenter - worldHalf) - playerX) * 0.34 * scale);
-      final rightInnerX = size.width *
-          (0.5 + ((worldCenter + worldHalf) - playerX) * 0.34 * scale);
+      final leftInnerX =
+          size.width * (0.5 + ((center - halfWidth) - playerX) * 0.34 * scale);
+      final rightInnerX =
+          size.width * (0.5 + ((center + halfWidth) - playerX) * 0.34 * scale);
 
       final leftOuterX = size.width *
-          (0.5 + ((worldCenter - worldHalf - 0.34) - playerX) * 0.34 * scale);
+          (0.5 + ((center - halfWidth - 0.40) - playerX) * 0.34 * scale);
       final rightOuterX = size.width *
-          (0.5 + ((worldCenter + worldHalf + 0.34) - playerX) * 0.34 * scale);
+          (0.5 + ((center + halfWidth + 0.40) - playerX) * 0.34 * scale);
 
-      final baseFloorY = lerpDouble(horizonY + 18, bottomY, scale)!;
-      final floorY =
-          baseFloorY + (floorH - playerY) * size.height * 0.42 * scale;
+      final floorBaseY = lerpDouble(horizonY + 10, bottomY, scale)!;
+      final floorY = floorBaseY + (ground - playerY) * size.height * 0.46 * scale;
 
-      final ceilingBaseY = lerpDouble(horizonY - 6, size.height * 0.70, scale)!;
-      final ceilingY =
-          ceilingBaseY + (ceilingH - playerY) * size.height * 0.18 * scale;
+      final cliffLift = max(0.0, (ceiling - playerY) * 60 * scale);
+      final wallY = floorY - 20 - cliffLift;
 
-      leftWallOuter.add(Offset(leftOuterX, floorY));
-      leftWallInner.add(Offset(leftInnerX, floorY));
-      rightWallInner.add(Offset(rightInnerX, floorY));
-      rightWallOuter.add(Offset(rightOuterX, floorY));
+      leftOuter.add(Offset(leftOuterX, floorY));
+      leftInner.add(Offset(leftInnerX, wallY));
+      rightInner.add(Offset(rightInnerX, wallY));
+      rightOuter.add(Offset(rightOuterX, floorY));
 
-      floorLeft.add(Offset(leftInnerX, floorY));
-      floorRight.add(Offset(rightInnerX, floorY));
-
-      leftEdge.add(Offset(leftInnerX, floorY));
-      rightEdge.add(Offset(rightInnerX, floorY));
-
-      // Brighter center guidance so the route is obvious.
-      final centerY = lerpDouble(floorY - 10, ceilingY + 26, 0.10)!;
-      centerLine.add(Offset(screenCenterX, centerY));
+      centerPoints.add(Offset(screenCenterX, floorY - 6));
+      stripeLeft.add(Offset(leftInnerX, floorY - 4));
+      stripeRight.add(Offset(rightInnerX, floorY - 4));
     }
 
-    // Left wall
-    final leftWallPath = Path()
-      ..moveTo(leftWallOuter.first.dx, leftWallOuter.first.dy);
-    for (final p in leftWallOuter) {
-      leftWallPath.lineTo(p.dx, p.dy);
+    final leftWall = Path()..moveTo(leftOuter.first.dx, leftOuter.first.dy);
+    for (final p in leftOuter) {
+      leftWall.lineTo(p.dx, p.dy);
     }
-    for (final p in leftWallInner.reversed) {
-      leftWallPath.lineTo(p.dx, p.dy);
+    for (final p in leftInner.reversed) {
+      leftWall.lineTo(p.dx, p.dy);
     }
-    leftWallPath.close();
+    leftWall.close();
+
+    final rightWall = Path()..moveTo(rightInner.first.dx, rightInner.first.dy);
+    for (final p in rightInner) {
+      rightWall.lineTo(p.dx, p.dy);
+    }
+    for (final p in rightOuter.reversed) {
+      rightWall.lineTo(p.dx, p.dy);
+    }
+    rightWall.close();
+
+    final floor = Path()..moveTo(leftInner.first.dx, leftInner.first.dy);
+    for (final p in leftInner) {
+      floor.lineTo(p.dx, p.dy);
+    }
+    for (final p in rightInner.reversed) {
+      floor.lineTo(p.dx, p.dy);
+    }
+    floor.close();
+
+    canvas.drawPath(leftWall, Paint()..color = const Color(0x995D8BB5));
+    canvas.drawPath(rightWall, Paint()..color = const Color(0x995D8BB5));
 
     canvas.drawPath(
-      leftWallPath,
-      Paint()..color = const Color(0x99D4F4FF),
-    );
-
-    // Right wall
-    final rightWallPath = Path()
-      ..moveTo(rightWallInner.first.dx, rightWallInner.first.dy);
-    for (final p in rightWallInner) {
-      rightWallPath.lineTo(p.dx, p.dy);
-    }
-    for (final p in rightWallOuter.reversed) {
-      rightWallPath.lineTo(p.dx, p.dy);
-    }
-    rightWallPath.close();
-
-    canvas.drawPath(
-      rightWallPath,
-      Paint()..color = const Color(0x99D4F4FF),
-    );
-
-    // Floor ribbon
-    final floorPath = Path()..moveTo(floorLeft.first.dx, floorLeft.first.dy);
-    for (final p in floorLeft) {
-      floorPath.lineTo(p.dx, p.dy);
-    }
-    for (final p in floorRight.reversed) {
-      floorPath.lineTo(p.dx, p.dy);
-    }
-    floorPath.close();
-
-    canvas.drawPath(
-      floorPath,
+      floor,
       Paint()
         ..shader = const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Color(0xBBE7FBFF),
-            Color(0xFFF8FDFF),
+            Color(0xFFEAFBFF),
+            Color(0xFFFDFEFF),
           ],
         ).createShader(Rect.fromLTWH(0, horizonY, size.width, size.height)),
     );
 
-    // Strong readable canyon edges
-    final edgePaint = Paint()
-      ..color = Colors.white.withOpacity(0.40)
-      ..strokeWidth = 2.5
+    final edgeGlow = Paint()
+      ..color = Colors.white.withOpacity(0.34)
+      ..strokeWidth = 3.2
+      ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
 
-    final leftEdgePath = Path()..moveTo(leftEdge.first.dx, leftEdge.first.dy);
-    for (final p in leftEdge.skip(1)) {
+    final leftEdgePath = Path()..moveTo(leftInner.first.dx, leftInner.first.dy);
+    for (final p in leftInner.skip(1)) {
       leftEdgePath.lineTo(p.dx, p.dy);
     }
 
-    final rightEdgePath = Path()..moveTo(rightEdge.first.dx, rightEdge.first.dy);
-    for (final p in rightEdge.skip(1)) {
+    final rightEdgePath = Path()..moveTo(rightInner.first.dx, rightInner.first.dy);
+    for (final p in rightInner.skip(1)) {
       rightEdgePath.lineTo(p.dx, p.dy);
     }
 
-    canvas.drawPath(leftEdgePath, edgePaint);
-    canvas.drawPath(rightEdgePath, edgePaint);
+    canvas.drawPath(leftEdgePath, edgeGlow);
+    canvas.drawPath(rightEdgePath, edgeGlow);
 
-    // Center trench glow / guide
     final centerGlow = Paint()
-      ..color = accent.withOpacity(0.18)
-      ..strokeWidth = 14
-      ..strokeCap = StrokeCap.round;
+      ..color = accent.withOpacity(0.22)
+      ..strokeWidth = 16
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
 
     final centerCore = Paint()
-      ..color = accent.withOpacity(0.46)
+      ..color = accent.withOpacity(0.54)
       ..strokeWidth = 2.5
-      ..strokeCap = StrokeCap.round;
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
 
-    final centerPath = Path()..moveTo(centerLine.first.dx, centerLine.first.dy);
-    for (final p in centerLine.skip(1)) {
+    final centerPath = Path()..moveTo(centerPoints.first.dx, centerPoints.first.dy);
+    for (final p in centerPoints.skip(1)) {
       centerPath.lineTo(p.dx, p.dy);
     }
 
     canvas.drawPath(centerPath, centerGlow);
     canvas.drawPath(centerPath, centerCore);
 
-    // Light terrain stripes to help forward-motion reading
     final stripePaint = Paint()
-      ..color = Colors.white.withOpacity(0.10)
-      ..strokeWidth = 1.2;
+      ..color = Colors.white.withOpacity(0.12)
+      ..strokeWidth = 1.4;
 
-    for (int i = 6; i < centerLine.length; i += 4) {
-      final c = centerLine[i];
-      final l = leftEdge[i];
-      final r = rightEdge[i];
+    for (int i = 6; i < centerPoints.length; i += 4) {
+      final c = centerPoints[i];
+      final l = stripeLeft[i];
+      final r = stripeRight[i];
 
-      final t = i / (centerLine.length - 1);
-      final half = lerpDouble(8.0, 44.0, t)!;
+      final t = i / (centerPoints.length - 1);
+      final half = lerpDouble(8.0, 54.0, t)!;
 
-      final dirX = (r.dx - l.dx);
-      final dirY = (r.dy - l.dy);
-      final len = sqrt(dirX * dirX + dirY * dirY);
-      if (len <= 0.0001) continue;
+      final dx = r.dx - l.dx;
+      final dy = r.dy - l.dy;
+      final len = sqrt(dx * dx + dy * dy);
+      if (len < 0.001) continue;
 
-      final nx = dirX / len;
-      final ny = dirY / len;
+      final nx = dx / len;
+      final ny = dy / len;
 
       canvas.drawLine(
         Offset(c.dx - nx * half, c.dy - ny * half),
@@ -938,17 +890,15 @@ class _ReadableCanyonPainter extends CustomPainter {
 
   void _paintParticles(Canvas canvas, Size size) {
     for (final p in particles) {
-      final x = p.x * size.width;
-      final y = p.y * size.height;
       canvas.drawCircle(
-        Offset(x, y),
+        Offset(p.x * size.width, p.y * size.height),
         p.size,
-        Paint()..color = Colors.white.withOpacity(0.15),
+        Paint()..color = Colors.white.withOpacity(0.16),
       );
     }
   }
 
-  void _paintCockpitGlassLines(Canvas canvas, Size size) {
+  void _paintCockpitWindow(Canvas canvas, Size size) {
     final linePaint = Paint()
       ..color = accent.withOpacity(0.24)
       ..strokeWidth = 2
@@ -969,13 +919,11 @@ class _ReadableCanyonPainter extends CustomPainter {
       Offset(size.width * 0.50, size.height * 0.40),
       linePaint,
     );
-
     canvas.drawLine(
       Offset(size.width * 0.30, size.height * 0.20),
       Offset(size.width * 0.24, size.height * 0.40),
       linePaint,
     );
-
     canvas.drawLine(
       Offset(size.width * 0.70, size.height * 0.20),
       Offset(size.width * 0.76, size.height * 0.40),
@@ -999,7 +947,7 @@ class _ReadableCanyonPainter extends CustomPainter {
   }
 
   void _paintCockpitInterior(Canvas canvas, Size size) {
-    final darkPanel = Paint()..color = const Color(0xCC0A1018);
+    final darkPanel = Paint()..color = const Color(0xE0081018);
     final midPanel = Paint()..color = const Color(0xFF131D28);
     final bezel = Paint()
       ..color = accent.withOpacity(0.20)
@@ -1014,7 +962,6 @@ class _ReadableCanyonPainter extends CustomPainter {
       ..lineTo(size.width * 0.86, size.height * 0.84)
       ..lineTo(size.width, size.height)
       ..close();
-
     canvas.drawPath(dashPath, darkPanel);
 
     final nosePath = Path()
@@ -1023,7 +970,6 @@ class _ReadableCanyonPainter extends CustomPainter {
       ..lineTo(size.width * 0.54, size.height * 0.86)
       ..lineTo(size.width * 0.58, size.height)
       ..close();
-
     canvas.drawPath(nosePath, midPanel);
 
     _drawPanelScreen(
@@ -1065,7 +1011,7 @@ class _ReadableCanyonPainter extends CustomPainter {
       );
     }
 
-    final sideShade = Paint()..color = const Color(0x66081118);
+    final sideShade = Paint()..color = const Color(0x88081118);
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width * 0.06, size.height), sideShade);
     canvas.drawRect(
       Rect.fromLTWH(size.width * 0.94, 0, size.width * 0.06, size.height),
@@ -1115,5 +1061,5 @@ class _ReadableCanyonPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ReadableCanyonPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _DepthFlightPainter oldDelegate) => true;
 }
